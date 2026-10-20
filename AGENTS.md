@@ -64,7 +64,7 @@ Prerequisites: Linux x86-64, Loup 1.26.0 (`loup` and `loup-bootstrap` on
 | Build | `make build` | native binary at `build/cpuid` |
 | End-to-end tests | `make e2e` | runs `tests/e2e.sh build/cpuid`: structure, sane values, `/proc/cpuinfo` cross-checks |
 | Everything CI runs | `make ci` | check, test, build, e2e, then `build/cpuid --version` |
-| Clean | `make clean` | removes `build/` and `.temp/` |
+| Clean | `make clean` | removes `build/`, `.temp/` and `.loup-cache/` |
 
 Run `make ci` before reporting a change as done.
 
