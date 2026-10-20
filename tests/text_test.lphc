@@ -1,0 +1,45 @@
+@mode(host.native)
+
+from debug.assert import (expect, expectEq);
+from text import (hex, hex_upper, pad_left, pad_right, fixed2, size_text, wrap_words, trim_spaces);
+from samples import (expect_text);
+
+func test_hex(): void {
+    expect_text(hex(0, 8), "00000000", "zero padded");
+    expect_text(hex(0x8000001d, 8), "8000001d", "lower case");
+    expect_text(hex(255, 1), "ff", "wider than the width");
+    expect_text(hex_upper(0x80000001, 8), "80000001", "upper");
+    expect_text(hex_upper(0xab, 2), "AB", "upper digits");
+}
+
+func test_padding(): void {
+    expect_text(pad_right("ab", 4), "ab  ", "right");
+    expect_text(pad_left("ab", 4), "  ab", "left");
+    expect_text(pad_left("abcdef", 4), "abcdef", "never truncates");
+}
+
+func test_fixed2(): void {
+    expect_text(fixed2(1234), "12.34", "two decimals");
+    expect_text(fixed2(5), "0.05", "leading zero");
+    expect_text(fixed2(100), "1.00", "whole");
+}
+
+func test_size_text(): void {
+    expect_text(size_text(32768), "32 KiB", "KiB");
+    expect_text(size_text(1048576), "1 MiB", "MiB");
+    expect_text(size_text(1310720), "1280 KiB", "not a whole MiB");
+    expect_text(size_text(100), "100 B", "bytes");
+}
+
+func test_wrap_words(): void {
+    let words = ["aaaa", "bbbb", "cccc", "dddd"];
+    expect_text(wrap_words(words, 12, 2), "aaaa bbbb\n  cccc dddd", "wraps at the width");
+    expect_text(wrap_words(["x"], 80, 15), "x", "one word");
+    let none: list[string] = [];
+    expect_text(wrap_words(none, 80, 0), "", "no words");
+}
+
+func test_trim_spaces(): void {
+    expect_text(trim_spaces("  a b  "), "a b", "both ends");
+    expect_text(trim_spaces("   "), "", "only blanks");
+}

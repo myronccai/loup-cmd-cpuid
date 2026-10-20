@@ -1,0 +1,136 @@
+@mode(host.native)
+
+# Command-line parsing. cpuid has no subcommands: one optional view option
+# (-f, -c, -r, -b or --has) selects what to print, and -n sets the
+# benchmark's iteration count.
+
+from cpu.bench import (DEFAULT_ITERATIONS);
+from cpu.decode import (is_known_flag);
+
+pub const MAX_ITERATIONS: int = 1000000000;
+
+pub struct Options {
+    pub help: bool;
+    pub version: bool;
+    # "summary", "features", "caches", "raw", "bench" or "has"
+    pub mode: string;
+    # the flag name for --has
+    pub flag: string;
+    pub iterations: int;
+}
+
+# A positive decimal count of at most MAX_ITERATIONS.
+pub func parse_count(text: string): Result[int, string] {
+    if (text.len() == 0 or text.len() > 10) {
+        return Err(i"invalid iteration count '{$ text $}'");
+    }
+    var value = 0;
+    for (ch in text) {
+        let d = "0123456789".index_of(ch);
+        if (d < 0) {
+            return Err(i"invalid iteration count '{$ text $}'");
+        }
+        value = value * 10 + d;
+    }
+    if (value < 1 or value > MAX_ITERATIONS) {
+        return Err(i"iteration count must be from 1 to {$ MAX_ITERATIONS $}: '{$ text $}'");
+    }
+    return Ok(value);
+}
+
+pub func parse_args(argv: list[string]): Result[Options, string] {
+    var help = false;
+    var version = false;
+    var mode = "summary";
+    var flag = "";
+    var iterations = DEFAULT_ITERATIONS;
+    var iterations_given = false;
+
+    var i = 0;
+    while (i < argv.len()) {
+        let arg = argv[i];
+        i += 1;
+
+        # Split `--name=value` into its name and inline value.
+        var name = arg;
+        var inline_value: Option[string] = None;
+        if (arg.startsWith("--") and arg.contains("=")) {
+            let parts = arg.split("=");
+            name = parts[0];
+            inline_value = Some(parts.slice(1).join("="));
+        } else if (arg.startsWith("-n") and arg.len() > 2 and !arg.startsWith("--")) {
+            name = "-n";
+            inline_value = Some(arg.slice(2));
+        }
+
+        if (name == "-n" or name == "--iterations" or name == "--has") {
+            var value = "";
+            match inline_value {
+                Some(v) => { value = v; },
+                None => {
+                    if (i >= argv.len()) {
+                        return Err(i"option '{$ name $}' requires an argument");
+                    }
+                    value = argv[i];
+                    i += 1;
+                },
+            }
+            if (name == "--has") {
+                if (!is_known_flag(value)) {
+                    return Err(i"unknown flag '{$ value $}' (see 'cpuid --features')");
+                }
+                if (mode != "summary" and mode != "has") {
+                    return Err("only one of --features, --caches, --raw, --bench and --has may be given");
+                }
+                mode = "has";
+                flag = value;
+            } else {
+                iterations = parse_count(value)?;
+                iterations_given = true;
+            }
+            continue;
+        }
+
+        if (inline_value.is_some()) {
+            return Err(i"option '{$ name $}' doesn't allow an argument");
+        }
+        if (!arg.startsWith("-") or arg == "-") {
+            return Err(i"extra operand '{$ arg $}'");
+        }
+
+        var selected = "";
+        if (arg == "-h" or arg == "--help") {
+            help = true;
+        } else if (arg == "-V" or arg == "--version") {
+            version = true;
+        } else if (arg == "-f" or arg == "--features") {
+            selected = "features";
+        } else if (arg == "-c" or arg == "--caches") {
+            selected = "caches";
+        } else if (arg == "-r" or arg == "--raw") {
+            selected = "raw";
+        } else if (arg == "-b" or arg == "--bench") {
+            selected = "bench";
+        } else {
+            return Err(i"unrecognized option '{$ arg $}'");
+        }
+        if (selected.len() > 0) {
+            if (mode != "summary" and mode != selected) {
+                return Err("only one of --features, --caches, --raw, --bench and --has may be given");
+            }
+            mode = selected;
+        }
+    }
+
+    if (iterations_given and mode != "bench" and !help and !version) {
+        return Err("option '--iterations' needs --bench");
+    }
+
+    return Ok(Options(
+        help = help,
+        version = version,
+        mode = mode,
+        flag = flag,
+        iterations = iterations,
+    ));
+}

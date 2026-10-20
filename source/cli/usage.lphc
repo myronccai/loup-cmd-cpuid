@@ -1,0 +1,34 @@
+@mode(host.native)
+
+from appinfo import (APP_NAME, APP_VERSION);
+from cpu.bench import (DEFAULT_ITERATIONS, RUNS);
+
+pub func usage(): string {
+    let lines = [
+        i"usage: {$ APP_NAME $} [OPTION]...",
+        "",
+        "Report what the x86-64 processor says about itself through the CPUID",
+        "instruction, and time instructions with RDTSC.",
+        "",
+        "With no option, print a summary: vendor, brand, family, model, stepping,",
+        "hypervisor, address sizes, the flags present and the caches.",
+        "",
+        "  -f, --features        list every known flag: name, yes/no, CPUID location",
+        "  -c, --caches          list the caches",
+        "  -r, --raw             dump the raw CPUID leaves in hexadecimal",
+        i"  -b, --bench           time instructions and loops (best of {$ RUNS $} runs)",
+        i"  -n, --iterations=N    iterations per benchmark run (default {$ DEFAULT_ITERATIONS $})",
+        "      --has=FLAG        print nothing; exit 0 if the CPU has FLAG",
+        "                        (a /proc/cpuinfo name such as avx2), 1 if not",
+        "  -h, --help            display this help and exit",
+        "  -V, --version         output version information and exit",
+        "",
+        "Exit status: 0 on success, 1 if --has finds the flag absent or on an",
+        "error, 2 on a usage error. Runs on x86-64 only.",
+    ];
+    return lines.join("\n");
+}
+
+pub func version_line(): string {
+    return i"{$ APP_NAME $} (loup-cmd-{$ APP_NAME $}) {$ APP_VERSION $}";
+}

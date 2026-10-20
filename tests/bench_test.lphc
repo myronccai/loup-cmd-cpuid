@@ -1,0 +1,37 @@
+@mode(host.native)
+
+from debug.assert import (expect, expectEq);
+from cpu.bench import (run_benchmarks, chase_cycle, measure_tsc_mhz);
+from samples import (expect_text);
+
+func test_every_kernel_runs(): void {
+    let results = run_benchmarks(200, 1);
+    expectEq(results.len(), 9, "nine kernels");
+    expect_text(results[0].name, "rdtsc", "first kernel");
+    expect_text(results[8].name, "pointer chase", "last kernel");
+    expectEq(results[2].iterations, 2, "cpuid runs n / 100");
+    for (r in results) {
+        expect(r.best_cycles > 0, i"{$ r.name $} took time");
+        expectEq(r.hundredths, r.best_cycles * 100 / r.iterations, "per-iteration value");
+    }
+}
+
+func test_chase_is_one_cycle(): void {
+    let next = chase_cycle(64);
+    var seen: list[bool] = [];
+    for (i in 0..64) {
+        seen.push(false);
+    }
+    var p = 0;
+    for (step in 0..64) {
+        expect(!seen[p], "no entry visited twice");
+        seen[p] = true;
+        p = next[p];
+    }
+    expectEq(p, 0, "back at the start after 64 steps");
+}
+
+func test_tsc_frequency(): void {
+    let mhz = measure_tsc_mhz(5);
+    expect(mhz > 100 and mhz < 10000, i"plausible TSC frequency: {$ mhz $} MHz");
+}

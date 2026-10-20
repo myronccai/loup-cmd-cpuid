@@ -1,0 +1,88 @@
+@mode(host.native)
+
+# The only machine code in the program. Every `asm` block is x86-64 and is
+# allowed only because this file is host.native; in a host.dual file each one
+# is E_ASM_NOT_COMPILED, and `loup run` cannot execute them at all.
+#
+# Templates are Intel syntax (the compiler wraps x86 asm in
+# `.intel_syntax noprefix`). Operands bind to registers through GCC/LLVM
+# constraints: `out: var = "=a"` reads RAX into `var` after the
+# instructions, `in: "c" = expr` loads RCX before them.
+
+# The four registers one CPUID query returns.
+pub struct Regs {
+    pub eax: int;
+    pub ebx: int;
+    pub ecx: int;
+    pub edx: int;
+}
+
+# Executes CPUID with EAX = leaf and ECX = subleaf. In 64-bit mode the
+# instruction clears the upper halves of RAX, RBX, RCX and RDX, so each
+# output is the 32-bit register value as a non-negative int.
+pub func cpuid(leaf: int, subleaf: int): Regs {
+    var a = 0;
+    var b = 0;
+    var c = 0;
+    var d = 0;
+    @unsafe("asm: cpuid only reads processor identification registers")
+    asm {
+        "cpuid"
+        out: a = "=a", b = "=b", c = "=c", d = "=d"
+        in: "a" = leaf, "c" = subleaf
+    }
+    return Regs(eax = a, ebx = b, ecx = c, edx = d);
+}
+
+# The time-stamp counter: RDTSC leaves the low 32 bits in EAX and the high
+# 32 bits in EDX.
+pub func rdtsc(): int {
+    var lo = 0;
+    var hi = 0;
+    @unsafe("asm: rdtsc only reads the time-stamp counter")
+    asm {
+        "rdtsc"
+        out: lo = "=a", hi = "=d"
+    }
+    return (hi << 32) | lo;
+}
+
+# RDTSC after LFENCE, which waits for every earlier instruction to finish, so
+# the counter is not read ahead of the work being timed. Two lines of
+# template, one block.
+pub func rdtsc_ordered(): int {
+    var lo = 0;
+    var hi = 0;
+    @unsafe("asm: lfence and rdtsc only order and read the time-stamp counter")
+    asm {
+        "lfence"
+        "rdtsc"
+        out: lo = "=a", hi = "=d"
+    }
+    return (hi << 32) | lo;
+}
+
+# An empty template with one input: the compiler must have `x` in a register
+# here, so a loop that computes it can be neither deleted nor folded into a
+# closed form. (Google Benchmark calls this DoNotOptimize.)
+pub func keep(x: int): void {
+    @unsafe("asm: an empty template that only reads x from a register")
+    asm {
+        ""
+        in: "r" = x
+    }
+}
+
+# Returns `x` through RAX without an instruction. The output is tied to the
+# input's register, so the value is unchanged, but the optimizer cannot see
+# through the block: a divisor that comes out of it stays a real division.
+pub func opaque(x: int): int {
+    var r = 0;
+    @unsafe("asm: an empty template; the output register is the input register")
+    asm {
+        ""
+        out: r = "=a"
+        in: "a" = x
+    }
+    return r;
+}

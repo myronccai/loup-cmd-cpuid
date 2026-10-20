@@ -1,0 +1,76 @@
+@mode(host.native)
+
+# Recorded and hand-built CPUID snapshots for the decoder tests. Not a test
+# file itself: the tests import it (the Makefile puts tests/ on LOUPPATH).
+
+from cpu.insn import (Regs);
+from debug.assert import (expect);
+from cpu.snapshot import (Leaf, Snapshot);
+
+pub func leaf(l: int, s: int, a: int, b: int, c: int, d: int): Leaf {
+    return Leaf(leaf = l, subleaf = s, regs = Regs(eax = a, ebx = b, ecx = c, edx = d));
+}
+
+# An AMD Ryzen 9 7940HS (Zen 4), recorded with `cpuid --raw` (a subset).
+pub func amd_zen4(): Snapshot {
+    return Snapshot(leaves = [
+        leaf(0x00000000, 0, 0x00000010, 0x68747541, 0x444d4163, 0x69746e65),
+        leaf(0x00000001, 0, 0x00a70f41, 0x0f100800, 0x7ef8320b, 0x178bfbff),
+        leaf(0x00000004, 0, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        leaf(0x00000007, 0, 0x00000001, 0xf1bf97a9, 0x00405fde, 0x10000010),
+        leaf(0x00000007, 1, 0x00000020, 0x00000000, 0x00000000, 0x00000000),
+        leaf(0x80000000, 0, 0x80000028, 0x68747541, 0x444d4163, 0x69746e65),
+        leaf(0x80000001, 0, 0x00a70f41, 0x50000000, 0x75c237ff, 0x2fd3fbff),
+        leaf(0x80000002, 0, 0x20444d41, 0x657a7952, 0x2039206e, 0x30343937),
+        leaf(0x80000003, 0, 0x77205348, 0x6152202f, 0x6e6f6564, 0x30383720),
+        leaf(0x80000004, 0, 0x7247204d, 0x69687061, 0x20207363, 0x00202020),
+        leaf(0x80000005, 0, 0xff48ff40, 0xff48ff40, 0x20080140, 0x20080140),
+        leaf(0x80000006, 0, 0x5c002200, 0x6c004200, 0x04006140, 0x00809140),
+        leaf(0x80000007, 0, 0x00000000, 0x0000003b, 0x00000000, 0x0000e799),
+        leaf(0x80000008, 0, 0x00003030, 0x791ef257, 0x0000400f, 0x00010000),
+        leaf(0x8000001d, 0, 0x00004121, 0x01c0003f, 0x0000003f, 0x00000000),
+        leaf(0x8000001d, 1, 0x00004122, 0x01c0003f, 0x0000003f, 0x00000000),
+        leaf(0x8000001d, 2, 0x00004143, 0x01c0003f, 0x000007ff, 0x00000002),
+        leaf(0x8000001d, 3, 0x0003c163, 0x03c0003f, 0x00003fff, 0x00000001),
+    ]);
+}
+
+# The same AMD processor without leaf 0x8000001D, so the decoder falls back
+# to the legacy leaves 0x80000005 and 0x80000006.
+pub func amd_legacy(): Snapshot {
+    var leaves: list[Leaf] = [];
+    for (entry in amd_zen4().leaves) {
+        if (entry.leaf != 0x8000001d) {
+            leaves.push(entry);
+        }
+    }
+    return Snapshot(leaves = leaves);
+}
+
+# A hand-built Intel Core i7-8700 (Coffee Lake, family 6 model 158) under
+# KVM, with a brand string that has leading blanks.
+pub func intel_coffee_lake(): Snapshot {
+    return Snapshot(leaves = [
+        leaf(0x00000000, 0, 0x00000016, 0x756e6547, 0x6c65746e, 0x49656e69),
+        leaf(0x00000001, 0, 0x000906ea, 0x00100800, 0xfe983203, 0x17888111),
+        leaf(0x00000004, 0, 0x1c004121, 0x01c0003f, 0x0000003f, 0x00000000),
+        leaf(0x00000004, 1, 0x1c004122, 0x01c0003f, 0x0000003f, 0x00000000),
+        leaf(0x00000004, 2, 0x1c004143, 0x00c0003f, 0x000003ff, 0x00000000),
+        leaf(0x00000004, 3, 0x1c03c163, 0x03c0003f, 0x00002fff, 0x00000006),
+        leaf(0x00000007, 0, 0x00000000, 0x009c07a9, 0x00000000, 0x00000000),
+        leaf(0x40000000, 0, 0x40000001, 0x4b4d564b, 0x564b4d56, 0x0000004d),
+        leaf(0x80000000, 0, 0x80000008, 0x00000000, 0x00000000, 0x00000000),
+        leaf(0x80000001, 0, 0x00000000, 0x00000000, 0x00000121, 0x2c100800),
+        leaf(0x80000002, 0, 0x6e492020, 0x286c6574, 0x43202952, 0x2865726f),
+        leaf(0x80000003, 0, 0x20294d54, 0x382d3769, 0x20303037, 0x20555043),
+        leaf(0x80000004, 0, 0x2e332040, 0x48473032, 0x0000007a, 0x00000000),
+        leaf(0x80000007, 0, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
+        leaf(0x80000008, 0, 0x00003027, 0x00000000, 0x00000000, 0x00000000),
+    ]);
+}
+
+# expectEq on two strings fails in native tests even when they are equal
+# (Loup 1.26.0), so string results are compared with ==.
+pub func expect_text(actual: string, expected: string, context: string): void {
+    expect(actual == expected, i"{$ context $}: expected '{$ expected $}', got '{$ actual $}'");
+}

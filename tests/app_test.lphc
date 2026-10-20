@@ -1,0 +1,29 @@
+@mode(host.native)
+
+# Exit statuses of the whole command line. These tests print the program's
+# normal output.
+
+from debug.assert import (expectEq);
+from appinfo import (EXIT_OK, EXIT_USAGE, EXIT_ABSENT);
+from cli.app import (run);
+
+func test_version_and_help(): void {
+    expectEq(run(["--version"]), EXIT_OK, "--version");
+    expectEq(run(["--help"]), EXIT_OK, "--help");
+}
+
+func test_views_succeed(): void {
+    expectEq(run(["-c"]), EXIT_OK, "caches");
+    expectEq(run(["--raw"]), EXIT_OK, "raw");
+}
+
+func test_has_statuses(): void {
+    expectEq(run(["--has", "sse2"]), EXIT_OK, "every x86-64 processor has SSE2");
+    expectEq(run(["--has=amx_int8"]) == EXIT_OK or run(["--has=amx_int8"]) == EXIT_ABSENT, true, "present or absent");
+    expectEq(run(["--has", "nonsense"]), EXIT_USAGE, "unknown flag");
+}
+
+func test_usage_errors(): void {
+    expectEq(run(["--bogus"]), EXIT_USAGE, "unknown option");
+    expectEq(run(["-f", "-r"]), EXIT_USAGE, "two views");
+}

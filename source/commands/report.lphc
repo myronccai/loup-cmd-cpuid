@@ -1,0 +1,138 @@
+@mode(host.native)
+
+# The views. Each render_* function returns the whole text for a snapshot (or
+# for benchmark results), so tests can check it; only run_cpuid prints.
+
+from appinfo import (EXIT_OK, EXIT_ABSENT);
+from cli.args import (Options);
+from cpu.snapshot import (Snapshot, take_snapshot, EXTENDED_BASE);
+from cpu.decode import (vendor, brand, signature, hypervisor, address_bits,
+    max_basic_leaf, max_extended_leaf, present_flags, features, has_flag,
+    caches, cache_label, CacheInfo, Feature);
+from cpu.bench import (BenchResult, RUNS, run_benchmarks, measure_tsc_mhz);
+from text import (hex, hex_upper, pad_left, pad_right, fixed2, size_text, wrap_words);
+
+pub const KEY_WIDTH: int = 15;
+pub const LINE_WIDTH: int = 80;
+
+func field(key: string, value: string): string {
+    return pad_right(key + ":", KEY_WIDTH) + value;
+}
+
+# "32 KiB, 8-way, 64-byte lines, shared by 2 threads"
+pub func cache_text(c: CacheInfo): string {
+    var parts = [size_text(c.size)];
+    if (c.ways == 0) {
+        parts.push("fully associative");
+    } else if (c.ways > 0) {
+        parts.push(str(c.ways) + "-way");
+    }
+    parts.push(str(c.line) + "-byte lines");
+    if (c.shared_by == 1) {
+        parts.push("1 thread");
+    } else if (c.shared_by > 1) {
+        parts.push("shared by " + str(c.shared_by) + " threads");
+    }
+    return parts.join(", ");
+}
+
+pub func render_caches(snap: Snapshot): string {
+    let found = caches(snap);
+    if (found.len() == 0) {
+        return field("caches", "not reported");
+    }
+    var lines: list[string] = [];
+    for (c in found) {
+        lines.push(field(cache_label(c) + " cache", cache_text(c)));
+    }
+    return lines.join("\n");
+}
+
+pub func render_summary(snap: Snapshot): string {
+    let sig = signature(snap);
+    let (phys, virt) = address_bits(snap);
+    let hv = match hypervisor(snap) {
+        Some(name) => name,
+        None => "none",
+    };
+    var lines = [
+        field("vendor", vendor(snap)),
+        field("brand", brand(snap)),
+        field("family", i"{$ sig.family $} (0x{$ hex(sig.family, 2) $})"),
+        field("model", i"{$ sig.model $} (0x{$ hex(sig.model, 2) $})"),
+        field("stepping", str(sig.stepping)),
+        field("max leaf", i"0x{$ hex(max_basic_leaf(snap), 2) $}, extended 0x{$ hex(max_extended_leaf(snap), 8) $}"),
+        field("hypervisor", hv),
+        field("address sizes", if (phys == 0) { "not reported" } else { i"{$ phys $} bits physical, {$ virt $} bits virtual" }),
+        field("flags", wrap_words(present_flags(snap), LINE_WIDTH, KEY_WIDTH)),
+        render_caches(snap),
+    ];
+    return lines.join("\n");
+}
+
+# Intel SDM notation: 01H.EDX[26], 07H.0.EBX[5], 80000001H.ECX[6].
+pub func location(feat: Feature): string {
+    let leaf_text = if (feat.leaf >= EXTENDED_BASE) { hex_upper(feat.leaf, 8) } else { hex_upper(feat.leaf, 2) };
+    let sub_text = if (feat.leaf == 7) { "." + str(feat.subleaf) } else { "" };
+    return i"{$ leaf_text $}H{$ sub_text $}.{$ feat.reg.toUpperCase() $}[{$ feat.bit $}]";
+}
+
+pub func render_features(snap: Snapshot): string {
+    var lines = [pad_right("flag", 21) + pad_right("has", 5) + pad_right("cpuid", 18) + "description"];
+    for (state in features(snap)) {
+        let yes = if (state.present) { "yes" } else { "no" };
+        lines.push(pad_right(state.feature.name, 21) + pad_right(yes, 5)
+            + pad_right(location(state.feature), 18) + state.feature.desc);
+    }
+    return lines.join("\n");
+}
+
+pub func render_raw(snap: Snapshot): string {
+    var lines = ["leaf      sub  eax       ebx       ecx       edx"];
+    for (entry in snap.leaves) {
+        let r = entry.regs;
+        lines.push(hex(entry.leaf, 8) + "  " + pad_right(str(entry.subleaf), 3) + "  "
+            + hex(r.eax, 8) + "  " + hex(r.ebx, 8) + "  " + hex(r.ecx, 8) + "  " + hex(r.edx, 8));
+    }
+    return lines.join("\n");
+}
+
+pub func render_bench(results: list[BenchResult], mhz: int, invariant: bool): string {
+    let kind = if (invariant) { "invariant" } else { "not invariant, so cycles may vary with frequency" };
+    var lines = [
+        i"TSC: {$ mhz $} MHz, {$ kind $}",
+        i"best of {$ RUNS $} runs, in TSC reference cycles",
+        "",
+        pad_right("kernel", 15) + pad_left("iterations", 11) + pad_left("cycles/iter", 13) + pad_left("ns/iter", 11),
+    ];
+    for (r in results) {
+        let ns = if (mhz > 0) { fixed2(r.hundredths * 1000 / mhz) } else { "-" };
+        lines.push(pad_right(r.name, 15) + pad_left(str(r.iterations), 11)
+            + pad_left(fixed2(r.hundredths), 13) + pad_left(ns, 11));
+    }
+    return lines.join("\n");
+}
+
+pub func run_cpuid(opts: Options): int {
+    let snap = take_snapshot();
+    if (opts.mode == "has") {
+        let present = has_flag(snap, opts.flag).unwrap_or(false);
+        return if (present) { EXIT_OK } else { EXIT_ABSENT };
+    }
+    if (opts.mode == "bench") {
+        let mhz = measure_tsc_mhz(50);
+        let invariant = has_flag(snap, "nonstop_tsc").unwrap_or(false);
+        println(render_bench(run_benchmarks(opts.iterations, RUNS), mhz, invariant));
+        return EXIT_OK;
+    }
+    if (opts.mode == "features") {
+        println(render_features(snap));
+    } else if (opts.mode == "caches") {
+        println(render_caches(snap));
+    } else if (opts.mode == "raw") {
+        println(render_raw(snap));
+    } else {
+        println(render_summary(snap));
+    }
+    return EXIT_OK;
+}

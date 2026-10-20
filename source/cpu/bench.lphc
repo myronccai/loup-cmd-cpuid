@@ -1,0 +1,200 @@
+@mode(host.native)
+
+# Cycle-timed micro-benchmarks. Each kernel runs `n` iterations between two
+# ordered RDTSC reads and returns the elapsed time-stamp-counter cycles.
+# `keep` makes every iteration's result observable, and `opaque` hides
+# constants, so the optimizer can neither delete a loop nor fold it into a
+# closed form (an add loop would otherwise become one multiplication).
+
+from cpu.insn import (cpuid, rdtsc, rdtsc_ordered, keep, opaque);
+from system.time import (monotonicNs);
+
+pub const RUNS: int = 5;
+pub const DEFAULT_ITERATIONS: int = 1000000;
+# The pointer chase walks 2^22 eight-byte entries (32 MiB), more than the
+# last-level cache of most processors, so each step waits for memory.
+pub const CHASE_ENTRIES: int = 4194304;
+
+pub struct BenchResult {
+    pub name: string;
+    pub iterations: int;
+    # cycles of the fastest run
+    pub best_cycles: int;
+    # best_cycles per iteration, in hundredths of a cycle
+    pub hundredths: int;
+}
+
+func k_rdtsc(n: int): int {
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        keep(rdtsc());
+    }
+    return rdtsc_ordered() - t0;
+}
+
+func k_rdtsc_ordered(n: int): int {
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        keep(rdtsc_ordered());
+    }
+    return rdtsc_ordered() - t0;
+}
+
+func k_cpuid(n: int): int {
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        keep(cpuid(0, 0).eax);
+    }
+    return rdtsc_ordered() - t0;
+}
+
+# A dependent chain of adds: each iteration needs the previous result.
+func k_add(n: int): int {
+    var x = opaque(1);
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        x = x + i;
+        keep(x);
+    }
+    return rdtsc_ordered() - t0;
+}
+
+# A dependent chain of 64-bit multiplies (an odd factor keeps x odd, never 0).
+func k_mul(n: int): int {
+    var x = opaque(3);
+    let factor = opaque(6364136223846793005);
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        x = x * factor;
+        keep(x);
+    }
+    return rdtsc_ordered() - t0;
+}
+
+# A dependent chain of 64-bit divides by a divisor the compiler cannot see,
+# so it cannot turn the division into a multiplication.
+func k_div(n: int): int {
+    var x = opaque(1000000007);
+    let d = opaque(7);
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        x = (x + 2147483647) / d;
+        keep(x);
+    }
+    return rdtsc_ordered() - t0;
+}
+
+# A dependent chain of float adds. Without fast-math the compiler may not
+# reassociate them, so the chain stays serial.
+func k_fadd(n: int): int {
+    var acc = 0.0;
+    let step = (opaque(1) as float) * 0.5;
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        acc = acc + step;
+    }
+    let elapsed = rdtsc_ordered() - t0;
+    keep(acc as int);
+    return elapsed;
+}
+
+# Sequential reads: the hardware prefetcher streams the list.
+func k_sum(n: int, data: list[int]): int {
+    let mask = data.len() - 1;
+    var s = 0;
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        s = s + data[i & mask];
+    }
+    let elapsed = rdtsc_ordered() - t0;
+    keep(s);
+    return elapsed;
+}
+
+# Dependent random reads: the next index is the value just loaded.
+func k_chase(n: int, next: list[int]): int {
+    var p = 0;
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        p = next[p];
+    }
+    let elapsed = rdtsc_ordered() - t0;
+    keep(p);
+    return elapsed;
+}
+
+# A random single-cycle permutation of 0..size-1 (Sattolo's algorithm) from
+# a fixed-seed 64-bit LCG, so that following next[p] visits every entry.
+pub func chase_cycle(size: int): list[int] {
+    var next: list[int] = [];
+    for (i in 0..size) {
+        next.push(i);
+    }
+    var state = 88172645463325252;
+    var i = size - 1;
+    while (i > 0) {
+        state = state * 6364136223846793005 + 1442695040888963407;
+        let j = ((state >> 33) & 0x7FFFFFFF) % i;
+        let t = next[i];
+        next[i] = next[j];
+        next[j] = t;
+        i -= 1;
+    }
+    return next;
+}
+
+# TSC ticks per microsecond, measured against the monotonic clock over
+# about `millis` milliseconds.
+pub func measure_tsc_mhz(millis: int): int {
+    let w0 = monotonicNs();
+    let t0 = rdtsc_ordered();
+    var w1 = w0;
+    while (w1 - w0 < millis * 1000000) {
+        w1 = monotonicNs();
+    }
+    let t1 = rdtsc_ordered();
+    return (t1 - t0) * 1000 / (w1 - w0);
+}
+
+func result(name: string, iterations: int, best: int): BenchResult {
+    return BenchResult(
+        name = name,
+        iterations = iterations,
+        best_cycles = best,
+        hundredths = best * 100 / iterations,
+    );
+}
+
+func min_int(a: int, b: int): int {
+    return if (a < b) { a } else { b };
+}
+
+# Runs every kernel `runs` times with `n` iterations (CPUID with n / 100,
+# at least 1, because it is slow and traps to the hypervisor in a VM) and
+# keeps each kernel's fastest run.
+pub func run_benchmarks(n: int, runs: int): list[BenchResult] {
+    let names = ["rdtsc", "lfence+rdtsc", "cpuid", "int add", "int mul", "int div", "float add", "list sum", "pointer chase"];
+    let cpuid_n = if (n / 100 < 1) { 1 } else { n / 100 };
+    let chase = chase_cycle(CHASE_ENTRIES);
+    var out: list[BenchResult] = [];
+    for (k in 0..names.len()) {
+        let iterations = if (k == 2) { cpuid_n } else { n };
+        var best = -1;
+        for (r in 0..runs) {
+            let cycles = match k {
+                0 => k_rdtsc(iterations),
+                1 => k_rdtsc_ordered(iterations),
+                2 => k_cpuid(iterations),
+                3 => k_add(iterations),
+                4 => k_mul(iterations),
+                5 => k_div(iterations),
+                6 => k_fadd(iterations),
+                7 => k_sum(iterations, chase),
+                _ => k_chase(iterations, chase),
+            };
+            best = if (best < 0) { cycles } else { min_int(best, cycles) };
+        }
+        out.push(result(names[k], iterations, best));
+    }
+    return out;
+}

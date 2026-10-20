@@ -1,0 +1,51 @@
+@mode(host.native)
+
+# The real processor. Values differ between machines, so these check
+# structure and facts every x86-64 processor shares.
+
+from debug.assert import (expect, expectEq);
+from cpu.insn import (cpuid, rdtsc, rdtsc_ordered, opaque);
+from cpu.snapshot import (take_snapshot, lookup);
+from cpu.decode import (vendor, signature, has_flag, caches, max_basic_leaf);
+from commands.report import (render_raw);
+
+func test_cpuid_leaf_0(): void {
+    let r = cpuid(0, 0);
+    expect(r.eax >= 1, "leaf 1 exists on every x86-64 processor");
+    expect(r.ebx > 0 and r.ecx > 0 and r.edx > 0, "vendor registers");
+    expect(r.eax < 0x100000000 and r.ebx < 0x100000000, "32-bit values");
+}
+
+func test_snapshot_identity(): void {
+    let snap = take_snapshot();
+    expectEq(vendor(snap).len(), 12, "twelve-character vendor");
+    let sig = signature(snap);
+    expect(sig.family >= 6, "family 6 or later");
+    expect(sig.stepping >= 0 and sig.stepping < 16, "stepping is a nibble");
+    expectEq(lookup(snap, 0, 0).eax, max_basic_leaf(snap), "snapshot matches leaf 0");
+}
+
+func test_x86_64_baseline_flags(): void {
+    let snap = take_snapshot();
+    for (name in ["fpu", "tsc", "cmov", "sse", "sse2", "syscall", "nx", "lm"]) {
+        expect(has_flag(snap, name).unwrap_or(false), i"{$ name $} is part of x86-64");
+    }
+}
+
+func test_caches_and_raw(): void {
+    let snap = take_snapshot();
+    let found = caches(snap);
+    expect(found.len() >= 1, "at least one cache");
+    for (c in found) {
+        expect(c.size > 0 and c.line > 0, "positive size and line");
+        expect(c.level >= 1 and c.level <= 4, "level");
+    }
+    expect(render_raw(snap).split("\n")[1].startsWith("00000000  0    "), "raw starts at leaf 0");
+}
+
+func test_tsc_and_barriers(): void {
+    let a = rdtsc();
+    let b = rdtsc_ordered();
+    expect(b > a, "the TSC moves forward");
+    expectEq(opaque(12345), 12345, "opaque returns its input");
+}

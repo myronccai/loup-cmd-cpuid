@@ -1,0 +1,60 @@
+{
+  "toolchain_version": "1.26.0+7ff5779a5f8943aa29bcfae7dbc05fc0b9c78fe919734708c0ae751341e1c9c6",
+  "entries": {
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/appinfo.lphc": {
+      "cache_key": "fa70ee326e306d8964c4ad0be493293b1362dcd0bd4c44c18f34fbe855d1656b",
+      "artifact_path": "824d67137fbe1065a5244ed9135bc2234cc1786b913fb54f307e531d52bc7d40.mir",
+      "cached_at": "2026-10-20T07:03:14.158864310+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/cli/app.lphc": {
+      "cache_key": "3f35c50f21cc17410f1638b419dac243d54ffdbfa3f95b9a9342d7980faf6bea",
+      "artifact_path": "857c522d06da36cc834a41934e80184157117715c3a1fe8768bff47d5b942bff.mir",
+      "cached_at": "2026-10-20T07:09:20.531183999+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/cli/args.lphc": {
+      "cache_key": "8f0090e6fc4c33a41e983b0bf39ec1663006764a1db3b07bfbdb0ec1f1e6582f",
+      "artifact_path": "24d2ebe27a663ae55ee0a18577800ec481964602dcab3024e5d8c815352aa75c.mir",
+      "cached_at": "2026-10-20T07:09:20.457537746+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/cli/usage.lphc": {
+      "cache_key": "1f4f13110cf0574e4d554b596c0a50608821d59ba258980e19abebe2f83178e3",
+      "artifact_path": "5dee63111cf4effd05c8c1033e6af1d2cbe5362f6bdcfae459e1c6979760a07c.mir",
+      "cached_at": "2026-10-20T07:03:14.245155925+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/commands/report.lphc": {
+      "cache_key": "2f98b64387e6dd43cd3bb8454cc2d3edfe6b2485898905149ff781ee30570896",
+      "artifact_path": "04794c4b751ee9d37ef0f603156e3530dc1cbd10d5cea36161f56c4dc20ad1d7.mir",
+      "cached_at": "2026-10-20T07:09:20.493672530+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/cpu/bench.lphc": {
+      "cache_key": "5c866ecd6a930d2cd6f230c0126c1c5d7199c9e8d64662f61ce44063d560b20f",
+      "artifact_path": "2719ee6a81b36a19708a92200bdf04b49d919f8e759d792d1d378d88462a2173.mir",
+      "cached_at": "2026-10-20T07:03:14.213950003+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/cpu/decode.lphc": {
+      "cache_key": "cba27ec7b93c09336f26f7b4ecf892cbf38eda82902d67654438623a2478c01f",
+      "artifact_path": "6dae0542e2762111b36b74d62233436919ddd52f960bf40744f6229ab330f5ef.mir",
+      "cached_at": "2026-10-20T07:09:20.427356225+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/cpu/insn.lphc": {
+      "cache_key": "ef5183357810adb052b47e79176ff81bccd275356f4f859021d5c54f8b53d194",
+      "artifact_path": "01cb98b792fe392736b9fb6d1b2b933dddaceb2d89d973592adc89a5c838bb84.mir",
+      "cached_at": "2026-10-20T07:03:14.173058687+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/cpu/snapshot.lphc": {
+      "cache_key": "0204cbb6059036dd6840a68eaa5c497d8c284a400e471281a16572d64d31c7f3",
+      "artifact_path": "77393f9378b639f8b1c16978f94f3ff207fa60d2e92a9b9e39a5ca738beed873.mir",
+      "cached_at": "2026-10-20T07:03:14.228733375+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/main.lphc": {
+      "cache_key": "347aeed2373ee91735be4f334bc615067dc7f5c598332734257d2d4475f12b6a",
+      "artifact_path": "48e24cbbfc611d078224b3fc290ddb488a720892b826e15cd9526da4138cf442.mir",
+      "cached_at": "2026-10-20T07:09:20.569506139+00:00"
+    },
+    "/home/myron/repos/ccai-examples/loup-cmd-cpuid/source/text.lphc": {
+      "cache_key": "015c0ca018916cb046c6c90a0b72f843f36c61ae0fa899d44887f03c530160dc",
+      "artifact_path": "f1d7d45ae203b5411f648f3fd3dd8e3df0d165d161c2ef2415e085455abd7774.mir",
+      "cached_at": "2026-10-20T07:03:14.195433411+00:00"
+    }
+  }
+}

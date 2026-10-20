@@ -1,0 +1,165 @@
+@mode(host.native)
+
+# The decoder against recorded and hand-built snapshots: no CPUID executed.
+
+from debug.assert import (expect, expectEq);
+from cpu.decode import (vendor, brand, signature, signature_of, hypervisor,
+    address_bits, max_basic_leaf, max_extended_leaf, has_flag, present_flags,
+    feature_table, caches, cache_label, reg_text, amd_ways, is_known_flag);
+from cpu.snapshot import (Snapshot);
+from samples import (leaf, amd_zen4, amd_legacy, intel_coffee_lake, expect_text);
+
+func test_amd_identity(): void {
+    let snap = amd_zen4();
+    expect_text(vendor(snap), "AuthenticAMD", "vendor");
+    expect_text(brand(snap), "AMD Ryzen 9 7940HS w/ Radeon 780M Graphics", "brand without trailing blanks");
+    let sig = signature(snap);
+    expectEq(sig.family, 25, "family 0xF + 0xA");
+    expectEq(sig.model, 116, "model 0x74");
+    expectEq(sig.stepping, 1, "stepping");
+    expect(hypervisor(snap).is_none(), "no hypervisor");
+    let (phys, virt) = address_bits(snap);
+    expectEq(phys, 48, "physical bits");
+    expectEq(virt, 48, "virtual bits");
+    expectEq(max_basic_leaf(snap), 0x10, "max basic leaf");
+    expectEq(max_extended_leaf(snap), 0x80000028, "max extended leaf");
+}
+
+func test_intel_identity(): void {
+    let snap = intel_coffee_lake();
+    expect_text(vendor(snap), "GenuineIntel", "vendor");
+    expect_text(brand(snap), "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz", "brand without leading blanks");
+    let sig = signature(snap);
+    expectEq(sig.family, 6, "family");
+    expectEq(sig.model, 158, "extended model prepended");
+    expectEq(sig.stepping, 10, "stepping");
+    expect_text(hypervisor(snap).unwrap_or(""), "KVMKVMKVM", "hypervisor vendor");
+    let (phys, virt) = address_bits(snap);
+    expectEq(phys, 39, "physical bits");
+    expectEq(virt, 48, "virtual bits");
+}
+
+func test_signature_rules(): void {
+    let p4 = signature_of(0x00000f29);
+    expectEq(p4.family, 15, "base family 0xF with no extension");
+    expectEq(p4.model, 2, "model");
+    expectEq(p4.stepping, 9, "stepping");
+    let i486 = signature_of(0x00010435);
+    expectEq(i486.family, 4, "family 4");
+    expectEq(i486.model, 3, "extended model ignored below family 6");
+    let k8 = signature_of(0x00a00f11);
+    expectEq(k8.family, 25, "extended family added to 0xF");
+    expectEq(k8.model, 1, "model");
+}
+
+func test_brand_absent(): void {
+    let snap = Snapshot(leaves = [leaf(0x80000000, 0, 0x80000001, 0, 0, 0)]);
+    expect_text(brand(snap), "(not reported)", "no brand leaves");
+    let (phys, virt) = address_bits(snap);
+    expectEq(phys + virt, 0, "no address-size leaf");
+}
+
+func test_reg_text(): void {
+    expect_text(reg_text(0x756e6547), "Genu", "little-endian bytes");
+    expect_text(reg_text(0x0000004d), "M", "NULs skipped");
+}
+
+func test_amd_flags(): void {
+    let snap = amd_zen4();
+    for (name in ["sse2", "pni", "sse4_2", "avx", "avx2", "fma", "aes", "sha_ni",
+                  "avx512f", "avx512bw", "avx512_bf16", "lm", "abm", "nonstop_tsc"]) {
+        expect(has_flag(snap, name).unwrap_or(false), i"{$ name $} present");
+    }
+    for (name in ["vmx", "hle", "rtm", "avx512pf", "xop", "fma4", "hypervisor", "amx_tile"]) {
+        expect(!has_flag(snap, name).unwrap_or(true), i"{$ name $} absent");
+    }
+    expect(has_flag(snap, "warp_drive").is_none(), "unknown flag");
+    let flags = present_flags(snap);
+    expect_text(flags[0], "fpu", "table order");
+    expect_text(flags[flags.len() - 1], "nonstop_tsc", "last flag");
+}
+
+func test_intel_flags(): void {
+    let snap = intel_coffee_lake();
+    for (name in ["sse4_2", "avx", "avx2", "bmi2", "aes", "hypervisor", "abm", "rdtscp", "nonstop_tsc"]) {
+        expect(has_flag(snap, name).unwrap_or(false), i"{$ name $} present");
+    }
+    for (name in ["avx512f", "sha_ni", "sse4a", "svm", "avx_vnni"]) {
+        expect(!has_flag(snap, name).unwrap_or(true), i"{$ name $} absent");
+    }
+}
+
+func test_leaf_above_maximum_is_absent(): void {
+    # 0x80000007 reads as set, but the maximum extended leaf is 0x80000004.
+    let snap = Snapshot(leaves = [
+        leaf(0x80000000, 0, 0x80000004, 0, 0, 0),
+        leaf(0x80000007, 0, 0, 0, 0, 0x100),
+    ]);
+    expect(!has_flag(snap, "nonstop_tsc").unwrap_or(true), "beyond the maximum");
+}
+
+func test_feature_table_is_consistent(): void {
+    let table = feature_table();
+    expect(table.len() >= 90, "at least 90 flags");
+    var seen: list[string] = [];
+    for (feat in table) {
+        expect(!seen.contains(feat.name), i"{$ feat.name $} listed once");
+        seen.push(feat.name);
+        expect(feat.bit >= 0 and feat.bit < 32, i"{$ feat.name $} bit in range");
+        expect(feat.reg == "eax" or feat.reg == "ebx" or feat.reg == "ecx" or feat.reg == "edx", i"{$ feat.name $} register");
+        expect(is_known_flag(feat.name), i"{$ feat.name $} known");
+    }
+    expect(!is_known_flag("SSE2"), "names are lower case");
+}
+
+func test_amd_caches_from_leaf_8000001d(): void {
+    let found = caches(amd_zen4());
+    expectEq(found.len(), 4, "four caches");
+    expect_text(cache_label(found[0]), "L1d", "L1 data");
+    expect_text(cache_label(found[1]), "L1i", "L1 instruction");
+    expect_text(cache_label(found[2]), "L2", "L2");
+    expect_text(cache_label(found[3]), "L3", "L3");
+    expectEq(found[0].size, 32768, "L1d size");
+    expectEq(found[2].size, 1048576, "L2 size");
+    expectEq(found[3].size, 16777216, "L3 size");
+    expectEq(found[3].ways, 16, "L3 ways");
+    expectEq(found[0].line, 64, "line size");
+    expectEq(found[0].shared_by, 2, "L1 shared by two threads");
+    expectEq(found[3].shared_by, 16, "L3 shared by sixteen threads");
+}
+
+func test_intel_caches_from_leaf_4(): void {
+    let found = caches(intel_coffee_lake());
+    expectEq(found.len(), 4, "four caches");
+    expectEq(found[0].size, 32768, "L1d 32 KiB");
+    expectEq(found[2].size, 262144, "L2 256 KiB");
+    expectEq(found[2].ways, 4, "L2 4-way");
+    expectEq(found[3].size, 12582912, "L3 12 MiB");
+    expectEq(found[3].shared_by, 16, "L3 sharing");
+}
+
+func test_legacy_amd_caches(): void {
+    let found = caches(amd_legacy());
+    expectEq(found.len(), 4, "L1d, L1i, L2, L3");
+    expect_text(cache_label(found[0]), "L1d", "L1d first");
+    expectEq(found[0].size, 32768, "L1d from 0x80000005 ECX");
+    expectEq(found[0].ways, 8, "L1d ways");
+    expectEq(found[1].size, 32768, "L1i from 0x80000005 EDX");
+    expectEq(found[2].size, 1048576, "L2 from 0x80000006 ECX");
+    expectEq(found[2].ways, 8, "way code 6 is 8-way");
+    expectEq(found[3].size, 16777216, "L3: 32 units of 512 KiB");
+    expectEq(found[3].ways, -1, "way code 9 defers to 0x8000001D");
+    expectEq(found[3].shared_by, 0, "sharing not reported");
+}
+
+func test_amd_way_codes(): void {
+    expectEq(amd_ways(6), 8, "6");
+    expectEq(amd_ways(0xA), 32, "A");
+    expectEq(amd_ways(0xF), 0, "fully associative");
+    expectEq(amd_ways(9), -1, "see 0x8000001D");
+}
+
+func test_no_caches(): void {
+    let snap = Snapshot(leaves = [leaf(0, 0, 4, 0, 0, 0)]);
+    expectEq(caches(snap).len(), 0, "nothing reported");
+}

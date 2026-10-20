@@ -1,0 +1,415 @@
+@mode(host.native)
+
+# Pure decoding of a Snapshot: vendor, brand, signature, hypervisor, address
+# sizes, feature flags and caches. Nothing here executes CPUID.
+
+from cpu.insn import (Regs);
+from cpu.snapshot import (Snapshot, lookup, HYPERVISOR_BASE, EXTENDED_BASE);
+from text import (trim_spaces);
+
+# The register `reg` ("eax", "ebx", "ecx", "edx") of a Regs value.
+# (if/else rather than `match`: the Stage0 native lane sends every string
+# `match` to its `_` arm.)
+pub func reg_value(r: Regs, reg: string): int {
+    if (reg == "eax") {
+        return r.eax;
+    } else if (reg == "ebx") {
+        return r.ebx;
+    } else if (reg == "ecx") {
+        return r.ecx;
+    }
+    return r.edx;
+}
+
+# The four bytes of a register as ASCII, least significant byte first,
+# skipping NULs.
+pub func reg_text(value: int): string {
+    var s = "";
+    for (i in 0..4) {
+        let byte = (value >> (8 * i)) & 0xFF;
+        if (byte != 0) {
+            s += str(char.of(byte));
+        }
+    }
+    return s;
+}
+
+# Highest basic and extended leaves (EAX of leaves 0 and 0x80000000).
+pub func max_basic_leaf(snap: Snapshot): int {
+    return lookup(snap, 0, 0).eax;
+}
+
+pub func max_extended_leaf(snap: Snapshot): int {
+    return lookup(snap, EXTENDED_BASE, 0).eax;
+}
+
+# "GenuineIntel", "AuthenticAMD", ...: EBX, EDX, ECX of leaf 0, in that order.
+pub func vendor(snap: Snapshot): string {
+    let r = lookup(snap, 0, 0);
+    return reg_text(r.ebx) + reg_text(r.edx) + reg_text(r.ecx);
+}
+
+# The 48-byte brand string from leaves 0x80000002-0x80000004, with NULs
+# dropped and leading and trailing blanks removed (as Linux does for
+# "model name"); "(not reported)" if the leaves do not exist.
+pub func brand(snap: Snapshot): string {
+    if (max_extended_leaf(snap) < EXTENDED_BASE + 4) {
+        return "(not reported)";
+    }
+    var s = "";
+    for (leaf in EXTENDED_BASE + 2..EXTENDED_BASE + 5) {
+        let r = lookup(snap, leaf, 0);
+        s += reg_text(r.eax) + reg_text(r.ebx) + reg_text(r.ecx) + reg_text(r.edx);
+    }
+    let trimmed = trim_spaces(s);
+    return if (trimmed.len() == 0) { "(not reported)" } else { trimmed };
+}
+
+pub struct Signature {
+    pub family: int;
+    pub model: int;
+    pub stepping: int;
+    pub raw: int;
+}
+
+# Family, model and stepping from leaf 1 EAX, combined the way the Linux
+# kernel does it (arch/x86/lib/cpu.c): the extended family is added only to
+# base family 0xF, the extended model is prepended from family 6 up.
+pub func signature_of(eax: int): Signature {
+    let base_family = (eax >> 8) & 0xF;
+    let ext_family = (eax >> 20) & 0xFF;
+    let base_model = (eax >> 4) & 0xF;
+    let ext_model = (eax >> 16) & 0xF;
+    let family = if (base_family == 0xF) { base_family + ext_family } else { base_family };
+    let model = if (family >= 6) { (ext_model << 4) + base_model } else { base_model };
+    return Signature(family = family, model = model, stepping = eax & 0xF, raw = eax);
+}
+
+pub func signature(snap: Snapshot): Signature {
+    return signature_of(lookup(snap, 1, 0).eax);
+}
+
+# The hypervisor vendor ("KVMKVMKVM", "Microsoft Hv", ...) when leaf 1 ECX
+# bit 31 says one is present, else None.
+pub func hypervisor(snap: Snapshot): Option[string] {
+    if (((lookup(snap, 1, 0).ecx >> 31) & 1) == 0) {
+        return None;
+    }
+    let r = lookup(snap, HYPERVISOR_BASE, 0);
+    let name = trim_spaces(reg_text(r.ebx) + reg_text(r.ecx) + reg_text(r.edx));
+    return Some(if (name.len() == 0) { "(unnamed)" } else { name });
+}
+
+# Physical and virtual address widths in bits from 0x80000008 EAX, or
+# (0, 0) if the leaf is absent.
+pub func address_bits(snap: Snapshot): (int, int) {
+    if (max_extended_leaf(snap) < EXTENDED_BASE + 8) {
+        return (0, 0);
+    }
+    let eax = lookup(snap, EXTENDED_BASE + 8, 0).eax;
+    return (eax & 0xFF, (eax >> 8) & 0xFF);
+}
+
+# ---------------------------------------------------------------------------
+# Feature flags
+
+# One flag: where it lives and what it means. Names are the Linux
+# /proc/cpuinfo names.
+pub struct Feature {
+    pub name: string;
+    pub leaf: int;
+    pub subleaf: int;
+    pub reg: string;
+    pub bit: int;
+    pub desc: string;
+}
+
+pub struct FeatureState {
+    pub feature: Feature;
+    pub present: bool;
+}
+
+func f(name: string, leaf: int, subleaf: int, reg: string, bit: int, desc: string): Feature {
+    return Feature(name = name, leaf = leaf, subleaf = subleaf, reg = reg, bit = bit, desc = desc);
+}
+
+pub func feature_table(): list[Feature] {
+    let e1 = EXTENDED_BASE + 1;
+    let e7 = EXTENDED_BASE + 7;
+    return [
+        f("fpu", 1, 0, "edx", 0, "x87 floating-point unit"),
+        f("tsc", 1, 0, "edx", 4, "time-stamp counter (RDTSC)"),
+        f("cx8", 1, 0, "edx", 8, "CMPXCHG8B"),
+        f("cmov", 1, 0, "edx", 15, "conditional move (CMOVcc)"),
+        f("clflush", 1, 0, "edx", 19, "CLFLUSH"),
+        f("mmx", 1, 0, "edx", 23, "MMX"),
+        f("fxsr", 1, 0, "edx", 24, "FXSAVE and FXRSTOR"),
+        f("sse", 1, 0, "edx", 25, "SSE"),
+        f("sse2", 1, 0, "edx", 26, "SSE2"),
+        f("ht", 1, 0, "edx", 28, "several logical processors per package"),
+        f("pni", 1, 0, "ecx", 0, "SSE3 (Prescott New Instructions)"),
+        f("pclmulqdq", 1, 0, "ecx", 1, "carry-less multiplication"),
+        f("monitor", 1, 0, "ecx", 3, "MONITOR and MWAIT"),
+        f("vmx", 1, 0, "ecx", 5, "Intel VT-x virtualization"),
+        f("ssse3", 1, 0, "ecx", 9, "Supplemental SSE3"),
+        f("fma", 1, 0, "ecx", 12, "fused multiply-add (FMA3)"),
+        f("cx16", 1, 0, "ecx", 13, "CMPXCHG16B"),
+        f("sse4_1", 1, 0, "ecx", 19, "SSE4.1"),
+        f("sse4_2", 1, 0, "ecx", 20, "SSE4.2"),
+        f("movbe", 1, 0, "ecx", 22, "MOVBE"),
+        f("popcnt", 1, 0, "ecx", 23, "POPCNT"),
+        f("aes", 1, 0, "ecx", 25, "AES-NI"),
+        f("xsave", 1, 0, "ecx", 26, "XSAVE and XRSTOR"),
+        f("osxsave", 1, 0, "ecx", 27, "XSAVE enabled by the OS (not in /proc/cpuinfo)"),
+        f("avx", 1, 0, "ecx", 28, "AVX"),
+        f("f16c", 1, 0, "ecx", 29, "half-precision conversion (F16C)"),
+        f("rdrand", 1, 0, "ecx", 30, "RDRAND"),
+        f("hypervisor", 1, 0, "ecx", 31, "running under a hypervisor"),
+        f("fsgsbase", 7, 0, "ebx", 0, "RDFSBASE, WRFSBASE and friends"),
+        f("bmi1", 7, 0, "ebx", 3, "bit manipulation set 1"),
+        f("hle", 7, 0, "ebx", 4, "TSX hardware lock elision"),
+        f("avx2", 7, 0, "ebx", 5, "AVX2"),
+        f("smep", 7, 0, "ebx", 7, "supervisor-mode execution prevention"),
+        f("bmi2", 7, 0, "ebx", 8, "bit manipulation set 2"),
+        f("erms", 7, 0, "ebx", 9, "enhanced REP MOVSB and STOSB"),
+        f("invpcid", 7, 0, "ebx", 10, "INVPCID"),
+        f("rtm", 7, 0, "ebx", 11, "TSX restricted transactional memory"),
+        f("avx512f", 7, 0, "ebx", 16, "AVX-512 foundation"),
+        f("avx512dq", 7, 0, "ebx", 17, "AVX-512 doubleword and quadword"),
+        f("rdseed", 7, 0, "ebx", 18, "RDSEED"),
+        f("adx", 7, 0, "ebx", 19, "multi-precision add-carry (ADCX, ADOX)"),
+        f("smap", 7, 0, "ebx", 20, "supervisor-mode access prevention"),
+        f("avx512ifma", 7, 0, "ebx", 21, "AVX-512 integer fused multiply-add"),
+        f("clflushopt", 7, 0, "ebx", 23, "CLFLUSHOPT"),
+        f("clwb", 7, 0, "ebx", 24, "CLWB"),
+        f("avx512pf", 7, 0, "ebx", 26, "AVX-512 prefetch"),
+        f("avx512er", 7, 0, "ebx", 27, "AVX-512 exponential and reciprocal"),
+        f("avx512cd", 7, 0, "ebx", 28, "AVX-512 conflict detection"),
+        f("sha_ni", 7, 0, "ebx", 29, "SHA-1 and SHA-256 extensions"),
+        f("avx512bw", 7, 0, "ebx", 30, "AVX-512 byte and word"),
+        f("avx512vl", 7, 0, "ebx", 31, "AVX-512 vector length extensions"),
+        f("avx512vbmi", 7, 0, "ecx", 1, "AVX-512 vector byte manipulation"),
+        f("umip", 7, 0, "ecx", 2, "user-mode instruction prevention"),
+        f("pku", 7, 0, "ecx", 3, "memory protection keys"),
+        f("avx512_vbmi2", 7, 0, "ecx", 6, "AVX-512 vector byte manipulation 2"),
+        f("gfni", 7, 0, "ecx", 8, "Galois field instructions"),
+        f("vaes", 7, 0, "ecx", 9, "vector AES"),
+        f("vpclmulqdq", 7, 0, "ecx", 10, "vector carry-less multiplication"),
+        f("avx512_vnni", 7, 0, "ecx", 11, "AVX-512 vector neural network instructions"),
+        f("avx512_bitalg", 7, 0, "ecx", 12, "AVX-512 bit algorithms"),
+        f("avx512_vpopcntdq", 7, 0, "ecx", 14, "AVX-512 VPOPCNTD and VPOPCNTQ"),
+        f("rdpid", 7, 0, "ecx", 22, "RDPID"),
+        f("movdiri", 7, 0, "ecx", 27, "MOVDIRI"),
+        f("movdir64b", 7, 0, "ecx", 28, "MOVDIR64B"),
+        f("avx512_4vnniw", 7, 0, "edx", 2, "AVX-512 4-iteration VNNI (Xeon Phi)"),
+        f("avx512_4fmaps", 7, 0, "edx", 3, "AVX-512 4-iteration FMA (Xeon Phi)"),
+        f("fsrm", 7, 0, "edx", 4, "fast short REP MOV"),
+        f("avx512_vp2intersect", 7, 0, "edx", 8, "AVX-512 VP2INTERSECT"),
+        f("serialize", 7, 0, "edx", 14, "SERIALIZE"),
+        f("hybrid_cpu", 7, 0, "edx", 15, "hybrid performance and efficiency cores"),
+        f("amx_bf16", 7, 0, "edx", 22, "AMX BFloat16"),
+        f("avx512_fp16", 7, 0, "edx", 23, "AVX-512 half precision"),
+        f("amx_tile", 7, 0, "edx", 24, "AMX tile architecture"),
+        f("amx_int8", 7, 0, "edx", 25, "AMX 8-bit integer"),
+        f("avx_vnni", 7, 1, "eax", 4, "AVX (VEX-encoded) VNNI"),
+        f("avx512_bf16", 7, 1, "eax", 5, "AVX-512 BFloat16"),
+        f("lahf_lm", e1, 0, "ecx", 0, "LAHF and SAHF in 64-bit mode"),
+        f("svm", e1, 0, "ecx", 2, "AMD-V virtualization"),
+        f("abm", e1, 0, "ecx", 5, "LZCNT (advanced bit manipulation)"),
+        f("sse4a", e1, 0, "ecx", 6, "SSE4a"),
+        f("3dnowprefetch", e1, 0, "ecx", 8, "PREFETCH and PREFETCHW"),
+        f("xop", e1, 0, "ecx", 11, "AMD extended operations"),
+        f("fma4", e1, 0, "ecx", 16, "four-operand fused multiply-add"),
+        f("tbm", e1, 0, "ecx", 21, "trailing bit manipulation"),
+        f("topoext", e1, 0, "ecx", 22, "topology extensions (leaf 0x8000001D)"),
+        f("syscall", e1, 0, "edx", 11, "SYSCALL and SYSRET"),
+        f("nx", e1, 0, "edx", 20, "no-execute page protection"),
+        f("mmxext", e1, 0, "edx", 22, "AMD MMX extensions"),
+        f("pdpe1gb", e1, 0, "edx", 26, "1 GiB pages"),
+        f("rdtscp", e1, 0, "edx", 27, "RDTSCP"),
+        f("lm", e1, 0, "edx", 29, "long mode (x86-64)"),
+        f("nonstop_tsc", e7, 0, "edx", 8, "invariant TSC: constant rate in every P- and C-state"),
+    ];
+}
+
+pub func feature_present(snap: Snapshot, feat: Feature): bool {
+    # A leaf above the reported maximum is not valid, whatever it reads as.
+    let max = if (feat.leaf >= EXTENDED_BASE) { max_extended_leaf(snap) } else { max_basic_leaf(snap) };
+    if (feat.leaf > max) {
+        return false;
+    }
+    let value = reg_value(lookup(snap, feat.leaf, feat.subleaf), feat.reg);
+    return ((value >> feat.bit) & 1) == 1;
+}
+
+pub func features(snap: Snapshot): list[FeatureState] {
+    var out: list[FeatureState] = [];
+    for (feat in feature_table()) {
+        out.push(FeatureState(feature = feat, present = feature_present(snap, feat)));
+    }
+    return out;
+}
+
+# Names of the flags that are present, in table order.
+pub func present_flags(snap: Snapshot): list[string] {
+    var names: list[string] = [];
+    for (state in features(snap)) {
+        if (state.present) {
+            names.push(state.feature.name);
+        }
+    }
+    return names;
+}
+
+# Some(true/false) for a known flag name, None for an unknown one.
+pub func has_flag(snap: Snapshot, name: string): Option[bool] {
+    for (feat in feature_table()) {
+        if (feat.name == name) {
+            return Some(feature_present(snap, feat));
+        }
+    }
+    return None;
+}
+
+# ---------------------------------------------------------------------------
+# Caches
+
+pub struct CacheInfo {
+    pub level: int;
+    # "data", "instruction" or "unified"
+    pub kind: string;
+    pub size: int;
+    # 0 when fully associative, -1 when not reported
+    pub ways: int;
+    pub line: int;
+    # threads sharing the cache; 0 when not reported
+    pub shared_by: int;
+}
+
+# "L1d", "L1i", "L2", ...
+pub func cache_label(c: CacheInfo): string {
+    let suffix = if (c.kind == "data") { "d" } else if (c.kind == "instruction") { "i" } else { "" };
+    return "L" + str(c.level) + suffix;
+}
+
+# Decodes one leaf-4-format subleaf (Intel leaf 4, AMD leaf 0x8000001D), or
+# None for cache type 0 (no more caches).
+pub func decode_cache_leaf(r: Regs): Option[CacheInfo] {
+    let kind_code = r.eax & 0x1F;
+    if (kind_code == 0) {
+        return None;
+    }
+    let kind = match kind_code {
+        1 => "data",
+        2 => "instruction",
+        _ => "unified",
+    };
+    let level = (r.eax >> 5) & 0x7;
+    let fully = ((r.eax >> 9) & 1) == 1;
+    let shared_by = ((r.eax >> 14) & 0xFFF) + 1;
+    let line = (r.ebx & 0xFFF) + 1;
+    let partitions = ((r.ebx >> 12) & 0x3FF) + 1;
+    let ways = ((r.ebx >> 22) & 0x3FF) + 1;
+    let sets = r.ecx + 1;
+    return Some(CacheInfo(
+        level = level,
+        kind = kind,
+        size = ways * partitions * line * sets,
+        ways = if (fully) { 0 } else { ways },
+        line = line,
+        shared_by = shared_by,
+    ));
+}
+
+func caches_from_leaf(snap: Snapshot, leaf: int): list[CacheInfo] {
+    var out: list[CacheInfo] = [];
+    for (entry in snap.leaves) {
+        if (entry.leaf == leaf) {
+            match decode_cache_leaf(entry.regs) {
+                Some(c) => { out.push(c); },
+                None => {},
+            }
+        }
+    }
+    return out;
+}
+
+# AMD's associativity code in 0x80000006 (L2 and L3): 15 is fully
+# associative (0 ways); 9 ("see leaf 0x8000001D") and reserved codes are
+# not reported (-1). The arms are decimal: a hex literal pattern never
+# matches in Loup 1.26.0.
+pub func amd_ways(code: int): int {
+    return match code {
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        4 => 4,
+        5 => 6,
+        6 => 8,
+        8 => 16,
+        10 => 32,
+        11 => 48,
+        12 => 64,
+        13 => 96,
+        14 => 128,
+        15 => 0,
+        _ => -1,
+    };
+}
+
+# The legacy AMD leaves 0x80000005 (L1) and 0x80000006 (L2, L3). They do not
+# report sharing.
+pub func legacy_amd_caches(snap: Snapshot): list[CacheInfo] {
+    var out: list[CacheInfo] = [];
+    let max = max_extended_leaf(snap);
+    if (max >= EXTENDED_BASE + 5) {
+        let l1 = lookup(snap, EXTENDED_BASE + 5, 0);
+        if ((l1.ecx >> 24) > 0) {
+            let ways = (l1.ecx >> 16) & 0xFF;
+            out.push(CacheInfo(level = 1, kind = "data", size = (l1.ecx >> 24) * 1024,
+                ways = if (ways == 0xFF) { 0 } else { ways }, line = l1.ecx & 0xFF, shared_by = 0));
+        }
+        if ((l1.edx >> 24) > 0) {
+            let ways = (l1.edx >> 16) & 0xFF;
+            out.push(CacheInfo(level = 1, kind = "instruction", size = (l1.edx >> 24) * 1024,
+                ways = if (ways == 0xFF) { 0 } else { ways }, line = l1.edx & 0xFF, shared_by = 0));
+        }
+    }
+    if (max >= EXTENDED_BASE + 6) {
+        let l23 = lookup(snap, EXTENDED_BASE + 6, 0);
+        # Associativity code 0 means the cache is disabled.
+        if ((l23.ecx >> 16) > 0 and ((l23.ecx >> 12) & 0xF) != 0) {
+            out.push(CacheInfo(level = 2, kind = "unified", size = (l23.ecx >> 16) * 1024,
+                ways = amd_ways((l23.ecx >> 12) & 0xF), line = l23.ecx & 0xFF, shared_by = 0));
+        }
+        if ((l23.edx >> 18) > 0 and ((l23.edx >> 12) & 0xF) != 0) {
+            out.push(CacheInfo(level = 3, kind = "unified", size = (l23.edx >> 18) * 512 * 1024,
+                ways = amd_ways((l23.edx >> 12) & 0xF), line = l23.edx & 0xFF, shared_by = 0));
+        }
+    }
+    return out;
+}
+
+# The cache hierarchy: leaf 4 if it reports any cache (Intel, and others
+# that implement it), else AMD's leaf 0x8000001D, else the legacy AMD leaves.
+pub func caches(snap: Snapshot): list[CacheInfo] {
+    let from_leaf4 = caches_from_leaf(snap, 4);
+    if (from_leaf4.len() > 0) {
+        return from_leaf4;
+    }
+    let from_amd = caches_from_leaf(snap, EXTENDED_BASE + 0x1D);
+    if (from_amd.len() > 0) {
+        return from_amd;
+    }
+    return legacy_amd_caches(snap);
+}
+
+# Whether `name` is in the feature table (no snapshot needed).
+pub func is_known_flag(name: string): bool {
+    for (feat in feature_table()) {
+        if (feat.name == name) {
+            return true;
+        }
+    }
+    return false;
+}

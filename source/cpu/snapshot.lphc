@@ -1,0 +1,127 @@
+@mode(host.native)
+
+# One pass over the CPUID leaves the program decodes. After the snapshot is
+# taken, everything else is a pure function of it, so tests can hand the
+# decoder recorded register values instead of executing the instruction.
+
+from cpu.insn import (Regs, cpuid);
+
+pub const BASIC_CAP: int = 0x20;
+pub const HYPERVISOR_BASE: int = 0x40000000;
+pub const HYPERVISOR_CAP: int = 0x40000010;
+pub const EXTENDED_BASE: int = 0x80000000;
+pub const EXTENDED_CAP: int = 0x80000028;
+
+# The registers of one (leaf, subleaf) query.
+pub struct Leaf {
+    pub leaf: int;
+    pub subleaf: int;
+    pub regs: Regs;
+}
+
+pub struct Snapshot {
+    pub leaves: list[Leaf];
+}
+
+pub func zero_regs(): Regs {
+    return Regs(eax = 0, ebx = 0, ecx = 0, edx = 0);
+}
+
+# The registers recorded for (leaf, subleaf), or zeros if that query was not
+# made (most out-of-range leaves read as zeros on real hardware too).
+pub func lookup(snap: Snapshot, leaf: int, subleaf: int): Regs {
+    for (entry in snap.leaves) {
+        if (entry.leaf == leaf and entry.subleaf == subleaf) {
+            return entry.regs;
+        }
+    }
+    return zero_regs();
+}
+
+pub func has_leaf(snap: Snapshot, leaf: int): bool {
+    for (entry in snap.leaves) {
+        if (entry.leaf == leaf) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# The subleaves of `leaf` to record, given the registers of subleaf 0.
+func subleaves(leaf: int, first: Regs): list[Leaf] {
+    var out: list[Leaf] = [Leaf(leaf = leaf, subleaf = 0, regs = first)];
+    if (leaf == 4 or leaf == 0x8000001D) {
+        # Deterministic cache parameters: stop at cache type 0.
+        if ((first.eax & 0x1F) == 0) {
+            return out;
+        }
+        for (sub in 1..16) {
+            let r = cpuid(leaf, sub);
+            if ((r.eax & 0x1F) == 0) {
+                break;
+            }
+            out.push(Leaf(leaf = leaf, subleaf = sub, regs = r));
+        }
+    } else if (leaf == 7) {
+        # EAX of subleaf 0 is the highest valid subleaf.
+        let last = if (first.eax < 4) { first.eax } else { 4 };
+        for (sub in 1..last + 1) {
+            out.push(Leaf(leaf = leaf, subleaf = sub, regs = cpuid(leaf, sub)));
+        }
+    } else if (leaf == 0xB or leaf == 0x1F) {
+        # Extended topology: stop at level type 0 (ECX[15:8]).
+        if (((first.ecx >> 8) & 0xFF) == 0) {
+            return out;
+        }
+        for (sub in 1..8) {
+            let r = cpuid(leaf, sub);
+            if (((r.ecx >> 8) & 0xFF) == 0) {
+                break;
+            }
+            out.push(Leaf(leaf = leaf, subleaf = sub, regs = r));
+        }
+    } else if (leaf == 0xD) {
+        out.push(Leaf(leaf = leaf, subleaf = 1, regs = cpuid(leaf, 1)));
+    }
+    return out;
+}
+
+func read_range(edits leaves: list[Leaf], base: int, last: int): void {
+    var leaf = base;
+    while (leaf <= last) {
+        for (entry in subleaves(leaf, cpuid(leaf, 0))) {
+            leaves.push(entry);
+        }
+        leaf += 1;
+    }
+}
+
+func min_int(a: int, b: int): int {
+    return if (a < b) { a } else { b };
+}
+
+# Reads every leaf the program decodes or dumps: the basic leaves up to the
+# reported maximum, the hypervisor leaves when leaf 1 says a hypervisor is
+# present, and the extended leaves. Each range is capped so a buggy or
+# hostile maximum cannot make the dump unbounded.
+pub func take_snapshot(): Snapshot {
+    var leaves: list[Leaf] = [];
+    let max_basic = cpuid(0, 0).eax;
+    read_range(edits: leaves, 0, min_int(max_basic, BASIC_CAP));
+
+    let leaf1 = cpuid(1, 0);
+    if (((leaf1.ecx >> 31) & 1) == 1) {
+        let max_hv = cpuid(HYPERVISOR_BASE, 0).eax;
+        if (max_hv >= HYPERVISOR_BASE) {
+            read_range(edits: leaves, HYPERVISOR_BASE, min_int(max_hv, HYPERVISOR_CAP));
+        } else {
+            read_range(edits: leaves, HYPERVISOR_BASE, HYPERVISOR_BASE);
+        }
+    }
+
+    let max_ext = cpuid(EXTENDED_BASE, 0).eax;
+    if (max_ext >= EXTENDED_BASE) {
+        read_range(edits: leaves, EXTENDED_BASE, min_int(max_ext, EXTENDED_CAP));
+    }
+    return Snapshot(leaves = leaves);
+}

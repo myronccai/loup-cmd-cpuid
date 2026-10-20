@@ -1,0 +1,59 @@
+@mode(host.native)
+
+from debug.assert import (expect, expectEq);
+from cli.args import (parse_args, parse_count);
+from samples import (expect_text);
+
+func test_defaults(): void {
+    let none: list[string] = [];
+    let opts = parse_args(none).unwrap();
+    expect_text(opts.mode, "summary", "summary by default");
+    expectEq(opts.iterations, 1000000, "default iterations");
+    expect(!opts.help and !opts.version, "no help or version");
+}
+
+func test_views(): void {
+    expect_text(parse_args(["-f"]).unwrap().mode, "features", "-f");
+    expect_text(parse_args(["--caches"]).unwrap().mode, "caches", "--caches");
+    expect_text(parse_args(["-r"]).unwrap().mode, "raw", "-r");
+    expect_text(parse_args(["--bench"]).unwrap().mode, "bench", "--bench");
+    expect_text(parse_args(["-f", "--features"]).unwrap().mode, "features", "repeated view");
+}
+
+func test_has(): void {
+    let opts = parse_args(["--has", "avx2"]).unwrap();
+    expect_text(opts.mode, "has", "--has FLAG");
+    expect_text(opts.flag, "avx2", "flag");
+    expect_text(parse_args(["--has=sse2"]).unwrap().flag, "sse2", "--has=FLAG");
+    expect(parse_args(["--has", "AVX2"]).is_err(), "names are lower case");
+    expect(parse_args(["--has"]).is_err(), "missing flag");
+}
+
+func test_iterations(): void {
+    expectEq(parse_args(["-b", "-n", "500"]).unwrap().iterations, 500, "-n N");
+    expectEq(parse_args(["-b", "-n42"]).unwrap().iterations, 42, "-nN");
+    expectEq(parse_args(["--iterations=7", "--bench"]).unwrap().iterations, 7, "--iterations=N");
+    expect(parse_args(["-n", "5"]).is_err(), "-n needs --bench");
+    expect(parse_args(["-b", "-n"]).is_err(), "missing count");
+}
+
+func test_parse_count(): void {
+    expectEq(parse_count("1").unwrap(), 1, "one");
+    expectEq(parse_count("1000000000").unwrap(), 1000000000, "maximum");
+    expect(parse_count("0").is_err(), "zero");
+    expect(parse_count("1000000001").is_err(), "above the maximum");
+    expect(parse_count("-5").is_err(), "negative");
+    expect(parse_count("1e6").is_err(), "not decimal digits");
+    expect(parse_count("").is_err(), "empty");
+}
+
+func test_conflicts_and_errors(): void {
+    expect(parse_args(["-f", "-c"]).is_err(), "two views");
+    expect(parse_args(["-b", "--has", "sse"]).is_err(), "bench and has");
+    expect(parse_args(["--bogus"]).is_err(), "unknown long option");
+    expect(parse_args(["-x"]).is_err(), "unknown short option");
+    expect(parse_args(["extra"]).is_err(), "operand");
+    expect(parse_args(["--raw=yes"]).is_err(), "value on a flag");
+    expect(parse_args(["-h"]).unwrap().help, "-h");
+    expect(parse_args(["--version"]).unwrap().version, "--version");
+}

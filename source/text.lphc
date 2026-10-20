@@ -1,0 +1,111 @@
+@mode(host.native)
+
+# Small text helpers shared by the reports. Integer arithmetic only: the
+# benchmark keeps its averages in hundredths so that formatting needs no
+# floating point.
+
+const LOWER_DIGITS: string = "0123456789abcdef";
+const UPPER_DIGITS: string = "0123456789ABCDEF";
+
+func digits_of(n: int, width: int, digits: string): string {
+    var out = "";
+    var v = n;
+    while (v > 0) {
+        out = digits.slice(v & 0xF, (v & 0xF) + 1) + out;
+        v = v >> 4;
+    }
+    while (out.len() < width) {
+        out = "0" + out;
+    }
+    return out;
+}
+
+# Lower-case hexadecimal of a non-negative int, zero-padded to `width`.
+pub func hex(n: int, width: int): string {
+    return digits_of(n, width, LOWER_DIGITS);
+}
+
+# Upper-case hexadecimal, as the Intel SDM writes leaf numbers.
+pub func hex_upper(n: int, width: int): string {
+    return digits_of(n, width, UPPER_DIGITS);
+}
+
+pub func pad_right(s: string, width: int): string {
+    var out = s;
+    while (out.len() < width) {
+        out += " ";
+    }
+    return out;
+}
+
+pub func pad_left(s: string, width: int): string {
+    var out = s;
+    while (out.len() < width) {
+        out = " " + out;
+    }
+    return out;
+}
+
+# 1234 -> "12.34", 5 -> "0.05".
+pub func fixed2(hundredths: int): string {
+    let whole = hundredths / 100;
+    let frac = hundredths % 100;
+    let frac_text = if (frac < 10) { "0" + str(frac) } else { str(frac) };
+    return str(whole) + "." + frac_text;
+}
+
+# A byte count as "48 KiB" or "2 MiB": the largest unit that divides it.
+pub func size_text(bytes: int): string {
+    let mib = 1024 * 1024;
+    if (bytes >= mib and bytes % mib == 0) {
+        return str(bytes / mib) + " MiB";
+    }
+    if (bytes >= 1024 and bytes % 1024 == 0) {
+        return str(bytes / 1024) + " KiB";
+    }
+    return str(bytes) + " B";
+}
+
+# Joins words with single spaces into lines of at most `width` columns. Every
+# line after the first starts with `indent` spaces; the first line is
+# assumed to start at column `indent` too.
+pub func wrap_words(words: list[string], width: int, indent: int): string {
+    var pad = "";
+    while (pad.len() < indent) {
+        pad += " ";
+    }
+    var out = "";
+    var column = indent;
+    var first = true;
+    for (w in words) {
+        if (first) {
+            out += w;
+            column += w.len();
+            first = false;
+        } else if (column + 1 + w.len() > width) {
+            out += "\n" + pad + w;
+            column = indent + w.len();
+        } else {
+            out += " " + w;
+            column += 1 + w.len();
+        }
+    }
+    return out;
+}
+
+# Removes leading and trailing spaces.
+pub func trim_spaces(s: string): string {
+    var chars: list[string] = [];
+    for (ch in s) {
+        chars.push(ch);
+    }
+    var a = 0;
+    var b = chars.len();
+    while (a < b and chars[a] == " ") {
+        a += 1;
+    }
+    while (b > a and chars[b - 1] == " ") {
+        b -= 1;
+    }
+    return chars.slice(a, b).join("");
+}
