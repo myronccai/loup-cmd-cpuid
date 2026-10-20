@@ -110,6 +110,10 @@ not expect exact CPU values: CI runners have different processors.
     decimal.
   - `expectEq` on two equal strings fails in native tests: use
     `expect_text(actual, expected, context)` from `tests/samples.lphc`.
+  - A test file that does not compile (a reserved word such as `where` as a
+    binding is enough) is skipped silently. A full `make test` therefore
+    fails unless it ran every `test_` function; find the broken file with
+    `LOUPPATH=source:tests loup-bootstrap run tests/FILE`.
 - Keep `APP_VERSION` in `source/appinfo.lphc` equal to `version` in
   `package.lppkg`.
 - The skill documents toolchain 1.25.1; this project targets 1.26.0. When

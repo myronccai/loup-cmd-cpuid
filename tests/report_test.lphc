@@ -66,15 +66,15 @@ func test_feature_view(): void {
 func test_locations(): void {
     let table = feature_table();
     for (feat in table) {
-        let where = location(feat);
+        let loc = location(feat);
         if (feat.name == "sse2") {
-            expect_text(where, "01H.EDX[26]", "leaf 1");
+            expect_text(loc, "01H.EDX[26]", "leaf 1");
         } else if (feat.name == "avx2") {
-            expect_text(where, "07H.0.EBX[5]", "leaf 7 subleaf 0");
+            expect_text(loc, "07H.0.EBX[5]", "leaf 7 subleaf 0");
         } else if (feat.name == "avx512_bf16") {
-            expect_text(where, "07H.1.EAX[5]", "leaf 7 subleaf 1");
+            expect_text(loc, "07H.1.EAX[5]", "leaf 7 subleaf 1");
         } else if (feat.name == "lm") {
-            expect_text(where, "80000001H.EDX[29]", "extended leaf");
+            expect_text(loc, "80000001H.EDX[29]", "extended leaf");
         }
     }
 }

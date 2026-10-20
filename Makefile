@@ -34,7 +34,19 @@ check:
 # shared sample snapshots. Narrow the run with TEST_ARGS, e.g.
 # `make test TEST_ARGS="--filter amd"`.
 test:
-	LOUPPATH=$(CURDIR)/source:$(CURDIR)/tests$${LOUPPATH:+:$$LOUPPATH} $(LOUP_BOOTSTRAP) test --native --no-color $(TEST_ARGS)
+	@mkdir -p .temp
+	LOUPPATH=$(CURDIR)/source:$(CURDIR)/tests$${LOUPPATH:+:$$LOUPPATH} $(LOUP_BOOTSTRAP) test --native --no-color $(TEST_ARGS) > .temp/test.log 2>&1; \
+	status=$$?; cat .temp/test.log; exit $$status
+	@# A test file that does not compile is skipped silently ("found 0 tests"),
+	@# so a full run must account for every test_ function.
+	@if [ -z "$(TEST_ARGS)" ]; then \
+	    want=$$(cat tests/*_test.lphc | grep -c '^func test_'); \
+	    got=$$(sed -n 's/^Tests: \([0-9]*\) total.*/\1/p' .temp/test.log); \
+	    if [ "$$want" != "$$got" ]; then \
+	        echo "make test: ran $$got of $$want tests; a test file did not compile (find it with: LOUPPATH=source:tests loup-bootstrap run tests/FILE)"; \
+	        exit 1; \
+	    fi; \
+	fi
 
 # Native executable (needs clang).
 build: $(BIN)
