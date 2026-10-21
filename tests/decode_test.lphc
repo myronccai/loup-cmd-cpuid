@@ -8,7 +8,7 @@
 # with the modules it imports from source/ and tests/ (both on LOUPPATH),
 # into its own native binary and runs it. Not part of build/cpuid.
 
-from debug.assert import (expect, expectEq);
+from debug.assert import (expect, expectEq, expectSome);
 from cpu.decode import (vendor, brand, signature, signature_of, hypervisor,
     address_bits, max_basic_leaf, max_extended_leaf, has_flag, present_flags,
     feature_table, caches, cache_label, reg_text, amd_ways, is_known_flag);
@@ -80,9 +80,10 @@ func test_amd_flags(): void {
         expect(!has_flag(snap, name).unwrap_or(true), i"{$ name $} absent");
     }
     expect(has_flag(snap, "warp_drive").is_none(), "unknown flag");
+    expect(expectSome(has_flag(snap, "avx512f"), "avx512f is a known flag"), "avx512f present");
     let flags = present_flags(snap);
     expect_text(flags[0], "fpu", "table order");
-    expect_text(flags[flags.len() - 1], "nonstop_tsc", "last flag");
+    expect_text(flags[-1], "nonstop_tsc", "last flag");
 }
 
 func test_intel_flags(): void {

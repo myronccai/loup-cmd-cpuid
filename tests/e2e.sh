@@ -127,7 +127,7 @@ run --bench -n 2000
 [ "$status" -eq 0 ] && ok || bad "--bench exit status $status"
 has_line "TSC frequency" '^TSC: [0-9]+ MHz, (invariant|not invariant)'
 has_line "bench header"  '^kernel +iterations +cycles/iter +ns/iter$'
-for kernel in 'rdtsc' 'lfence\+rdtsc' 'cpuid' 'int add' 'int mul' 'int div' 'float add' 'list sum' 'pointer chase'; do
+for kernel in 'empty loop' 'rdtsc' 'lfence\+rdtsc' 'cpuid' 'mfence' 'lfence' 'sfence' 'int add' 'int mul' 'int div' 'float add' 'list sum' 'pointer chase'; do
     has_line "bench $kernel" "^$kernel +[0-9]+ +[0-9]+\.[0-9]{2} +([0-9]+\.[0-9]{2}|-)$"
 done
 has_line "cpuid runs n/100" '^cpuid +20 '

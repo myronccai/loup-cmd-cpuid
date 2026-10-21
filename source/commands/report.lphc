@@ -15,13 +15,14 @@ from cpu.decode import (vendor, brand, signature, hypervisor, address_bits,
     max_basic_leaf, max_extended_leaf, present_flags, features, has_flag,
     caches, cache_label, CacheInfo, Feature);
 from cpu.bench import (BenchResult, RUNS, run_benchmarks, measure_tsc_mhz);
-from text import (hex, hex_upper, pad_left, pad_right, fixed2, size_text, wrap_words);
+from text import (hex, hex_upper, fixed2, size_text, wrap_words);
+from core.string_utils import (padLeft, padRight);
 
 pub const KEY_WIDTH: int = 15;
 pub const LINE_WIDTH: int = 80;
 
 func field(key: string, value: string): string {
-    return pad_right(key + ":", KEY_WIDTH) + value;
+    return padRight(key + ":", KEY_WIDTH, " ") + value;
 }
 
 # "32 KiB, 8-way, 64-byte lines, shared by 2 threads"
@@ -83,11 +84,11 @@ pub func location(feat: Feature): string {
 }
 
 pub func render_features(snap: Snapshot): string {
-    var lines = [pad_right("flag", 21) + pad_right("has", 5) + pad_right("cpuid", 18) + "description"];
+    var lines = [padRight("flag", 21, " ") + padRight("has", 5, " ") + padRight("cpuid", 18, " ") + "description"];
     for (state in features(snap)) {
         let yes = if (state.present) { "yes" } else { "no" };
-        lines.push(pad_right(state.feature.name, 21) + pad_right(yes, 5)
-            + pad_right(location(state.feature), 18) + state.feature.desc);
+        lines.push(padRight(state.feature.name, 21, " ") + padRight(yes, 5, " ")
+            + padRight(location(state.feature), 18, " ") + state.feature.desc);
     }
     return lines.join("\n");
 }
@@ -96,7 +97,7 @@ pub func render_raw(snap: Snapshot): string {
     var lines = ["leaf      sub  eax       ebx       ecx       edx"];
     for (entry in snap.leaves) {
         let r = entry.regs;
-        lines.push(hex(entry.leaf, 8) + "  " + pad_right(str(entry.subleaf), 3) + "  "
+        lines.push(hex(entry.leaf, 8) + "  " + padRight(str(entry.subleaf), 3, " ") + "  "
             + hex(r.eax, 8) + "  " + hex(r.ebx, 8) + "  " + hex(r.ecx, 8) + "  " + hex(r.edx, 8));
     }
     return lines.join("\n");
@@ -108,12 +109,12 @@ pub func render_bench(results: list[BenchResult], mhz: int, invariant: bool): st
         i"TSC: {$ mhz $} MHz, {$ kind $}",
         i"best of {$ RUNS $} runs, in TSC reference cycles",
         "",
-        pad_right("kernel", 15) + pad_left("iterations", 11) + pad_left("cycles/iter", 13) + pad_left("ns/iter", 11),
+        padRight("kernel", 15, " ") + padLeft("iterations", 11, " ") + padLeft("cycles/iter", 13, " ") + padLeft("ns/iter", 11, " "),
     ];
     for (r in results) {
         let ns = if (mhz > 0) { fixed2(r.hundredths * 1000 / mhz) } else { "-" };
-        lines.push(pad_right(r.name, 15) + pad_left(str(r.iterations), 11)
-            + pad_left(fixed2(r.hundredths), 13) + pad_left(ns, 11));
+        lines.push(padRight(r.name, 15, " ") + padLeft(str(r.iterations), 11, " ")
+            + padLeft(fixed2(r.hundredths), 13, " ") + padLeft(ns, 11, " "));
     }
     return lines.join("\n");
 }

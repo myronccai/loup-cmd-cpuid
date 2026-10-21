@@ -90,11 +90,12 @@ cycles.
 
 #### Acceptance Criteria
 
-1. WHEN `-b` / `--bench` is given, THE program SHALL time each kernel (RDTSC,
-   LFENCE+RDTSC, CPUID, dependent integer add, multiply and divide chains, a
-   dependent float add chain, a sequential list sum and a random pointer
-   chase) and print the best of 5 runs as TSC cycles and nanoseconds per
-   iteration.
+1. WHEN `-b` / `--bench` is given, THE program SHALL time each kernel (an
+   empty loop as the baseline, RDTSC, LFENCE+RDTSC, CPUID, the MFENCE,
+   LFENCE and SFENCE fences, dependent integer add, multiply and divide
+   chains, a dependent float add chain, a sequential list sum and a random
+   pointer chase) and print the best of 5 runs as TSC cycles and
+   nanoseconds per iteration.
 2. WHEN `-n N` / `--iterations N` is given, THE program SHALL run N
    iterations per run (default 1000000; CPUID runs N/100, at least 1).
 3. THE program SHALL measure the TSC frequency against the monotonic clock

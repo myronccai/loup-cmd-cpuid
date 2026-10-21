@@ -1,8 +1,8 @@
 @mode(host.native)
 
-# Unit tests for the cpuid benchmark kernels (cpu/bench.lphc): every kernel
-# runs and reports time, the pointer chase is one cycle, and the measured
-# TSC frequency is plausible.
+# Unit tests for the cpuid benchmark kernels (cpu/bench.lphc): the kernel
+# table, every kernel runs and reports time, the pointer chase is one cycle,
+# and the measured TSC frequency is plausible.
 #
 # Runtime: host.native, run by the test runner: `make test` runs
 # `loup-bootstrap test --native`, which compiles each `func test_*()` here,
@@ -11,15 +11,33 @@
 # kernels run, briefly, on the processor of the machine running `make test`.
 
 from debug.assert import (expect, expectEq);
-from cpu.bench import (run_benchmarks, chase_cycle, measure_tsc_mhz);
+from cpu.bench import (run_benchmarks, kernels, chase_cycle, measure_tsc_mhz);
 from samples import (expect_text);
+
+func test_kernel_table(): void {
+    let table = kernels(chase_cycle(16));
+    expectEq(table.len(), 13, "thirteen kernels");
+    var names: list[string] = [];
+    for (k in table) {
+        expect(!names.contains(k.name), i"{$ k.name $} listed once");
+        expect(k.name.len() <= 14, i"{$ k.name $} fits the 15-column name field");
+        expect(k.divisor >= 1, i"{$ k.name $} divisor");
+        names.push(k.name);
+    }
+    expect_text(names.join(","), "empty loop,rdtsc,lfence+rdtsc,cpuid,mfence,lfence,sfence,"
+        + "int add,int mul,int div,float add,list sum,pointer chase", "table order");
+    # A kernel is a function value: call one directly.
+    let first = table[0].run;
+    expect(first(10) > 0, "the empty loop takes time");
+}
 
 func test_every_kernel_runs(): void {
     let results = run_benchmarks(200, 1);
-    expectEq(results.len(), 9, "nine kernels");
-    expect_text(results[0].name, "rdtsc", "first kernel");
-    expect_text(results[8].name, "pointer chase", "last kernel");
-    expectEq(results[2].iterations, 2, "cpuid runs n / 100");
+    expectEq(results.len(), 13, "thirteen kernels");
+    expect_text(results[0].name, "empty loop", "first kernel");
+    expect_text(results[-1].name, "pointer chase", "last kernel");
+    expectEq(results[3].iterations, 2, "cpuid runs n / 100");
+    expectEq(results[4].iterations, 200, "mfence runs n");
     for (r in results) {
         expect(r.best_cycles > 0, i"{$ r.name $} took time");
         expectEq(r.hundredths, r.best_cycles * 100 / r.iterations, "per-iteration value");

@@ -18,3 +18,5 @@
   - _Requirements: 6.1, 6.2, 6.3_
 - [x] 9. Unit tests (native), end-to-end tests of the binary
   - _Requirements: all_
+- [x] 10. Kernel table of function values; empty-loop and fence kernels
+  - _Requirements: 5.1_

@@ -27,7 +27,7 @@ mistakes (`freestanding.md` has the `asm` syntax). Load those only as needed.
 ├── source/                      # all Loup code; modules import each other by path from here
 │   ├── main.lphc                # entry point: func main() calls run(runtime.args())
 │   ├── appinfo.lphc             # APP_NAME, APP_VERSION, APP_SUMMARY, exit statuses
-│   ├── text.lphc                # hex(), pad_*(), fixed2(), size_text(), wrap_words()
+│   ├── text.lphc                # hex(), fixed2(), size_text(), wrap_words(); pads come from core.string_utils
 │   ├── cli/
 │   │   ├── args.lphc            # struct Options, parse_args(), parse_count()
 │   │   ├── usage.lphc           # usage(), version_line()
@@ -36,7 +36,7 @@ mistakes (`freestanding.md` has the `asm` syntax). Load those only as needed.
 │   │   ├── insn.lphc            # every asm block: cpuid(), rdtsc(), rdtsc_ordered(), keep(), opaque()
 │   │   ├── snapshot.lphc        # Leaf, Snapshot, take_snapshot(), lookup()
 │   │   ├── decode.lphc          # vendor(), brand(), signature(), feature_table(), caches()
-│   │   └── bench.lphc           # benchmark kernels, measure_tsc_mhz(), run_benchmarks()
+│   │   └── bench.lphc           # benchmark kernels, kernels() table, measure_tsc_mhz(), run_benchmarks()
 │   └── commands/
 │       └── report.lphc          # render_summary/features/caches/raw/bench(), run_cpuid()
 ├── tests/

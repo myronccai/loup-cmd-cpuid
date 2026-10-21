@@ -1,27 +1,29 @@
 @mode(host.native)
 
-# Text helpers shared by the cpuid reports: hexadecimal, padding, fixed-point
-# and byte sizes, word wrapping.
+# Text helpers shared by the cpuid reports: hexadecimal, fixed-point and
+# byte sizes, word wrapping. Column padding is core.string_utils' padLeft
+# and padRight, which the reports import directly.
 #
 # Runtime: host.native. Compiled into the native binary build/cpuid by
 # `make build` (Stage0 native build); tests/text_test.lphc checks it in
 # native test binaries. Integer arithmetic only: the benchmark keeps its
 # averages in hundredths so that formatting needs no floating point.
 
+from core.string_utils import (padLeft, repeat);
+
 const LOWER_DIGITS: string = "0123456789abcdef";
 const UPPER_DIGITS: string = "0123456789ABCDEF";
 
+# The hex digits of `n`, one nibble at a time from the right, then
+# zero-padded on the left to `width` (never truncated).
 func digits_of(n: int, width: int, digits: string): string {
     var out = "";
     var v = n;
     while (v > 0) {
         out = digits.slice(v & 0xF, (v & 0xF) + 1) + out;
-        v = v >> 4;
+        v >>= 4;
     }
-    while (out.len() < width) {
-        out = "0" + out;
-    }
-    return out;
+    return padLeft(out, width, "0");
 }
 
 # Lower-case hexadecimal of a non-negative int, zero-padded to `width`.
@@ -32,22 +34,6 @@ pub func hex(n: int, width: int): string {
 # Upper-case hexadecimal, as the Intel SDM writes leaf numbers.
 pub func hex_upper(n: int, width: int): string {
     return digits_of(n, width, UPPER_DIGITS);
-}
-
-pub func pad_right(s: string, width: int): string {
-    var out = s;
-    while (out.len() < width) {
-        out += " ";
-    }
-    return out;
-}
-
-pub func pad_left(s: string, width: int): string {
-    var out = s;
-    while (out.len() < width) {
-        out = " " + out;
-    }
-    return out;
 }
 
 # 1234 -> "12.34", 5 -> "0.05".
@@ -74,10 +60,7 @@ pub func size_text(bytes: int): string {
 # line after the first starts with `indent` spaces; the first line is
 # assumed to start at column `indent` too.
 pub func wrap_words(words: list[string], width: int, indent: int): string {
-    var pad = "";
-    while (pad.len() < indent) {
-        pad += " ";
-    }
+    let pad = repeat(" ", indent);
     var out = "";
     var column = indent;
     var first = true;

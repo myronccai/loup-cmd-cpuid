@@ -26,7 +26,7 @@ All sources are `@mode(host.native)` `.lphc` files: the `asm` blocks in
 | `source/cpu/snapshot.lphc` | `Regs`, `Leaf`, `Snapshot`, `take_snapshot()`, `lookup()` |
 | `source/cpu/decode.lphc` | vendor, brand, `Signature`, hypervisor, address sizes, the feature table, `CacheInfo` decoding |
 | `source/cpu/bench.lphc` | the benchmark kernels, `measure_tsc_mhz`, `run_benchmarks` |
-| `source/commands/text.lphc` | `hex`, padding, fixed-point and size formatting, word wrapping |
+| `source/text.lphc` | `hex`, fixed-point and size formatting, word wrapping (padding is `core.string_utils`) |
 | `source/commands/report.lphc` | `render_summary`, `render_features`, `render_caches`, `render_raw`, `render_bench`, `run_cpuid` |
 
 ### The asm blocks
@@ -82,8 +82,14 @@ out-of-range leaves.
 ### Benchmarks
 
 Each kernel is a function `(n: int): int` that runs `n` iterations between
-two `rdtsc_ordered` reads and returns the elapsed TSC cycles. `run_benchmarks`
-runs each kernel 5 times and keeps the minimum. Results are kept as
+two `rdtsc_ordered` reads and returns the elapsed TSC cycles. `kernels()`
+lists them as `Kernel` values (name, iteration divisor, function value; the
+memory kernels are lambdas capturing the chase list), and `run_benchmarks`
+runs each entry 5 times and keeps the minimum (`system.collections.min`).
+The fence kernels call `native.atomic` (`hwFence`, `hwFenceAcquire`,
+`hwFenceRelease`); the empty loop and the memory kernels use
+`compilerFence()` so the optimizer keeps the loop and keeps the loads inside
+the timed region. Results are kept as
 hundredths of a cycle per iteration (integers) and printed with two decimals.
 The pointer chase walks a single random cycle (Sattolo's algorithm with a
 fixed-seed LCG) over 2^22 list entries (32 MiB), so each step is a cache miss.

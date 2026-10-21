@@ -37,6 +37,16 @@ and runs on Linux x86-64.
   `in: "r" = x`) forces each result into a register, and `opaque(x)` (an
   empty template whose output is tied to its input register) hides a
   divisor so that a division stays a division.
+- **Fences and function values.** The fence kernels call the
+  `native.atomic` module (`hwFence`, `hwFenceAcquire`, `hwFenceRelease`:
+  MFENCE, LFENCE, SFENCE), which only `host.native` code may import, and
+  `compilerFence()` keeps the optimizer from deleting the empty loop or
+  moving the memory kernels' loads out of the timed region. The benchmark
+  table is a list of `Kernel` values whose `run` field is a function
+  (`fn(int): int`); the memory kernels are lambdas that capture the chase
+  list (`func(n: int) => k_sum(n, chase)`), and the chase permutation's LCG
+  is an `@overflowWrapping` function, so its 64-bit wrap-around is declared
+  rather than accidental.
 - **Pure decoding behind one snapshot.** All CPUID leaves are read once into a
   `Snapshot`; everything else is a pure function of it. The unit tests feed
   the decoder a recorded AMD Zen 4 snapshot and a hand-built Intel one, so the
@@ -175,21 +185,29 @@ TSC: 3992 MHz, invariant
 best of 5 runs, in TSC reference cycles
 
 kernel          iterations  cycles/iter    ns/iter
-rdtsc              1000000        32.91       8.24
-lfence+rdtsc       1000000        63.71      15.95
-cpuid                10000       207.05      51.86
-int add            1000000         0.98       0.24
-int mul            1000000         2.96       0.74
-int div            1000000        12.91       3.23
-float add          1000000         2.98       0.74
-list sum           1000000         2.96       0.74
-pointer chase      1000000       445.06     111.48
+empty loop         1000000         1.72       0.43
+rdtsc              1000000        30.33       7.59
+lfence+rdtsc       1000000        58.57      14.67
+cpuid                10000       190.84      47.80
+mfence             1000000        52.05      13.03
+lfence             1000000        21.23       5.31
+sfence             1000000         0.88       0.22
+int add            1000000         0.87       0.21
+int mul            1000000         2.62       0.65
+int div            1000000        11.52       2.88
+float add          1000000         2.65       0.66
+list sum           1000000         2.70       0.67
+pointer chase      1000000       380.95      95.42
 ```
 
-`int add`, `int mul`, `int div` and `float add` are dependent chains, so they
-show latency; `pointer chase` follows a random cycle through 32 MiB, so each
-step is a cache miss. In a virtual machine `cpuid` traps to the hypervisor and
-costs thousands of cycles.
+`empty loop` is the loop alone, the overhead every other row includes.
+`mfence`, `lfence` and `sfence` are the three x86 fences with no memory
+traffic around them: MFENCE waits for every earlier load and store, LFENCE for
+every earlier instruction, and SFENCE, which only orders stores, costs almost
+nothing here. `int add`, `int mul`, `int div` and `float add` are dependent
+chains, so they show latency; `pointer chase` follows a random cycle through
+32 MiB, so each step is a cache miss. In a virtual machine `cpuid` traps to
+the hypervisor and costs thousands of cycles.
 
 ## Options
 
@@ -229,14 +247,14 @@ Exit status: `0` success, `1` `--has` found the flag absent (or an error),
 ```text
 source/main.lphc              # entry point
 source/appinfo.lphc           # name, version, exit statuses
-source/text.lphc              # hex, padding, fixed-point and size formatting
+source/text.lphc              # hex, fixed-point and size formatting, wrapping
 source/cli/args.lphc          # options
 source/cli/usage.lphc         # --help and --version text
 source/cli/app.lphc           # run(): parse, dispatch, exit status
 source/cpu/insn.lphc          # every asm block: cpuid, rdtsc, keep, opaque
 source/cpu/snapshot.lphc      # read all leaves once
 source/cpu/decode.lphc        # vendor, brand, signature, flags, caches
-source/cpu/bench.lphc         # benchmark kernels and TSC frequency
+source/cpu/bench.lphc         # benchmark kernels, the kernel table, TSC frequency
 source/commands/report.lphc   # the views; run_cpuid
 tests/*_test.lphc             # native unit tests (make test)
 tests/samples.lphc            # recorded and hand-built snapshots for the tests

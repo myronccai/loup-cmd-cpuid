@@ -4,24 +4,28 @@
 #
 # Runtime: host.native. Compiled into the native binary build/cpuid by
 # `make build` (Stage0 native build); tests/bench_test.lphc runs every
-# kernel briefly in a native test binary.
+# kernel briefly in a native test binary. native.atomic is a host.native
+# module (its fences are asm), so the fence kernels exist only natively too.
 #
-# Structure: nine kernels (k_*), the pointer-chase permutation, the TSC
-# frequency measurement, then run_benchmarks(), which keeps each kernel's
-# best run. Each kernel runs `n` iterations between two ordered RDTSC reads
-# and returns the elapsed time-stamp-counter cycles. `keep` makes every
-# iteration's result observable, and `opaque` hides constants, so the
-# optimizer can neither delete a loop nor fold it into a closed form (an add
-# loop would otherwise become one multiplication).
+# Structure: thirteen kernels (k_*), the pointer-chase permutation and its
+# LCG, the TSC frequency measurement, then the kernel table and
+# run_benchmarks(), which runs every entry of the table and keeps each
+# kernel's best run. Each kernel runs `n` iterations between two ordered
+# RDTSC reads and returns the elapsed time-stamp-counter cycles. `keep`
+# makes every iteration's result observable, and `opaque` hides constants,
+# so the optimizer can neither delete a loop nor fold it into a closed form
+# (an add loop would otherwise become one multiplication).
 
 from cpu.insn import (cpuid, rdtsc, rdtsc_ordered, keep, opaque);
+from native.atomic import (hwFence, hwFenceAcquire, hwFenceRelease, compilerFence);
+from system.collections import (min);
 from system.time import (monotonicNs);
 
 pub const RUNS: int = 5;
-pub const DEFAULT_ITERATIONS: int = 1000000;
+pub const DEFAULT_ITERATIONS: int = 1_000_000;
 # The pointer chase walks 2^22 eight-byte entries (32 MiB), more than the
 # last-level cache of most processors, so each step waits for memory.
-pub const CHASE_ENTRIES: int = 4194304;
+pub const CHASE_ENTRIES: int = 4_194_304;
 
 pub struct BenchResult {
     pub name: string;
@@ -30,6 +34,28 @@ pub struct BenchResult {
     pub best_cycles: int;
     # best_cycles per iteration, in hundredths of a cycle
     pub hundredths: int;
+}
+
+## One row of the benchmark table: its name, how many times fewer
+## iterations it runs than the others (1 for most), and the kernel itself,
+## which runs that many iterations and returns the elapsed TSC cycles.
+pub struct Kernel {
+    pub name: string;
+    pub divisor: int;
+    pub run: fn(int): int;
+}
+
+# ---- Kernels ---------------------------------------------------------------
+
+# The loop alone. compilerFence() emits no instruction, but the optimizer
+# may not move memory accesses across it or delete the loop around it, so
+# this row is the per-iteration overhead of the loop the other rows share.
+func k_empty(n: int): int {
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        compilerFence();
+    }
+    return rdtsc_ordered() - t0;
 }
 
 func k_rdtsc(n: int): int {
@@ -52,6 +78,34 @@ func k_cpuid(n: int): int {
     let t0 = rdtsc_ordered();
     for (i in 0..n) {
         keep(cpuid(0, 0).eax);
+    }
+    return rdtsc_ordered() - t0;
+}
+
+# The three x86 fences from native.atomic, back to back. MFENCE waits until
+# every earlier load and store is globally visible, LFENCE until every
+# earlier instruction has completed, SFENCE orders stores only; with no
+# memory traffic in the loop, the rows show what each fence costs by itself.
+func k_mfence(n: int): int {
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        hwFence();
+    }
+    return rdtsc_ordered() - t0;
+}
+
+func k_lfence(n: int): int {
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        hwFenceAcquire();
+    }
+    return rdtsc_ordered() - t0;
+}
+
+func k_sfence(n: int): int {
+    let t0 = rdtsc_ordered();
+    for (i in 0..n) {
+        hwFenceRelease();
     }
     return rdtsc_ordered() - t0;
 }
@@ -82,7 +136,7 @@ func k_mul(n: int): int {
 # A dependent chain of 64-bit divides by a divisor the compiler cannot see,
 # so it cannot turn the division into a multiplication.
 func k_div(n: int): int {
-    var x = opaque(1000000007);
+    var x = opaque(1_000_000_007);
     let d = opaque(7);
     let t0 = rdtsc_ordered();
     for (i in 0..n) {
@@ -106,14 +160,18 @@ func k_fadd(n: int): int {
     return elapsed;
 }
 
-# Sequential reads: the hardware prefetcher streams the list.
+# Sequential reads: the hardware prefetcher streams the list. The compiler
+# fences keep the loads between the two counter reads: RDTSC's asm does not
+# touch memory, so without them the optimizer could move loads across it.
 func k_sum(n: int, data: list[int]): int {
     let mask = data.len() - 1;
     var s = 0;
     let t0 = rdtsc_ordered();
+    compilerFence();
     for (i in 0..n) {
         s = s + data[i & mask];
     }
+    compilerFence();
     let elapsed = rdtsc_ordered() - t0;
     keep(s);
     return elapsed;
@@ -123,46 +181,65 @@ func k_sum(n: int, data: list[int]): int {
 func k_chase(n: int, next: list[int]): int {
     var p = 0;
     let t0 = rdtsc_ordered();
+    compilerFence();
     for (i in 0..n) {
         p = next[p];
     }
+    compilerFence();
     let elapsed = rdtsc_ordered() - t0;
     keep(p);
     return elapsed;
 }
 
+# ---- The pointer-chase permutation -----------------------------------------
+
+## One step of the 64-bit linear congruential generator (Knuth's MMIX
+## constants). The arithmetic is meant to wrap modulo 2^64: @overflowWrapping
+## says so. Without it, a checked lane (the Stage0 interpreter) throws
+## NumericOverflowError on the first step; the native back end wraps either
+## way.
+@overflowWrapping
+func lcg_next(state: uint64): uint64 {
+    return state * 6364136223846793005u64 + 1442695040888963407u64;
+}
+
 # A random single-cycle permutation of 0..size-1 (Sattolo's algorithm) from
-# a fixed-seed 64-bit LCG, so that following next[p] visits every entry.
+# a fixed-seed LCG, so that following next[p] visits every entry. Sattolo
+# walks i down from size-1 and swaps entry i with a j below it (never i
+# itself), which is what makes the permutation a single cycle.
 pub func chase_cycle(size: int): list[int] {
     var next: list[int] = [];
     for (i in 0..size) {
         next.push(i);
     }
-    var state = 88172645463325252;
-    var i = size - 1;
-    while (i > 0) {
-        state = state * 6364136223846793005 + 1442695040888963407;
-        let j = ((state >> 33) & 0x7FFFFFFF) % i;
+    var state: uint64 = 88172645463325252u64;
+    for (var i = size - 1; i > 0; i = i - 1) {
+        state = lcg_next(state);
+        let j = ((state >> 33u64) & 0x7FFFFFFFu64) as int % i;
         let t = next[i];
         next[i] = next[j];
         next[j] = t;
-        i -= 1;
     }
     return next;
 }
 
+# ---- TSC frequency ---------------------------------------------------------
+
 # TSC ticks per microsecond, measured against the monotonic clock over
-# about `millis` milliseconds.
+# about `millis` milliseconds (at least one clock reading).
 pub func measure_tsc_mhz(millis: int): int {
+    const NS_PER_MS: int = 1_000_000;
     let w0 = monotonicNs();
     let t0 = rdtsc_ordered();
     var w1 = w0;
-    while (w1 - w0 < millis * 1000000) {
+    do {
         w1 = monotonicNs();
-    }
+    } while (w1 - w0 < millis * NS_PER_MS);
     let t1 = rdtsc_ordered();
     return (t1 - t0) * 1000 / (w1 - w0);
 }
+
+# ---- The table -------------------------------------------------------------
 
 func result(name: string, iterations: int, best: int): BenchResult {
     return BenchResult(
@@ -173,36 +250,41 @@ func result(name: string, iterations: int, best: int): BenchResult {
     );
 }
 
-func min_int(a: int, b: int): int {
-    return if (a < b) { a } else { b };
+## The rows of `cpuid --bench`, in order. CPUID runs n / 100 iterations
+## because it is slow and traps to the hypervisor in a VM. The memory
+## kernels need the chase permutation, so they are lambdas that capture it.
+pub func kernels(chase: list[int]): list[Kernel] {
+    return [
+        Kernel(name = "empty loop", divisor = 1, run = k_empty),
+        Kernel(name = "rdtsc", divisor = 1, run = k_rdtsc),
+        Kernel(name = "lfence+rdtsc", divisor = 1, run = k_rdtsc_ordered),
+        Kernel(name = "cpuid", divisor = 100, run = k_cpuid),
+        Kernel(name = "mfence", divisor = 1, run = k_mfence),
+        Kernel(name = "lfence", divisor = 1, run = k_lfence),
+        Kernel(name = "sfence", divisor = 1, run = k_sfence),
+        Kernel(name = "int add", divisor = 1, run = k_add),
+        Kernel(name = "int mul", divisor = 1, run = k_mul),
+        Kernel(name = "int div", divisor = 1, run = k_div),
+        Kernel(name = "float add", divisor = 1, run = k_fadd),
+        Kernel(name = "list sum", divisor = 1, run = func(n: int) => k_sum(n, chase)),
+        Kernel(name = "pointer chase", divisor = 1, run = func(n: int) => k_chase(n, chase)),
+    ];
 }
 
-# Runs every kernel `runs` times with `n` iterations (CPUID with n / 100,
-# at least 1, because it is slow and traps to the hypervisor in a VM) and
-# keeps each kernel's fastest run.
+# Runs every kernel `runs` times with `n / divisor` iterations (at least 1)
+# and keeps each kernel's fastest run: the run least disturbed by
+# interrupts, frequency changes and other processes.
 pub func run_benchmarks(n: int, runs: int): list[BenchResult] {
-    let names = ["rdtsc", "lfence+rdtsc", "cpuid", "int add", "int mul", "int div", "float add", "list sum", "pointer chase"];
-    let cpuid_n = if (n / 100 < 1) { 1 } else { n / 100 };
     let chase = chase_cycle(CHASE_ENTRIES);
     var out: list[BenchResult] = [];
-    for (k in 0..names.len()) {
-        let iterations = if (k == 2) { cpuid_n } else { n };
-        var best = -1;
+    for (k in kernels(chase)) {
+        let iterations = if (n / k.divisor < 1) { 1 } else { n / k.divisor };
+        let time_kernel = k.run;
+        var cycles: list[int] = [];
         for (r in 0..runs) {
-            let cycles = match k {
-                0 => k_rdtsc(iterations),
-                1 => k_rdtsc_ordered(iterations),
-                2 => k_cpuid(iterations),
-                3 => k_add(iterations),
-                4 => k_mul(iterations),
-                5 => k_div(iterations),
-                6 => k_fadd(iterations),
-                7 => k_sum(iterations, chase),
-                _ => k_chase(iterations, chase),
-            };
-            best = if (best < 0) { cycles } else { min_int(best, cycles) };
+            cycles.push(time_kernel(iterations));
         }
-        out.push(result(names[k], iterations, best));
+        out.push(result(k.name, iterations, min(cycles).unwrap_or(0)));
     }
     return out;
 }

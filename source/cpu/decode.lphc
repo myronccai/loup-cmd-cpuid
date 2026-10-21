@@ -15,6 +15,7 @@
 
 from cpu.insn import (Regs);
 from cpu.snapshot import (Snapshot, lookup, HYPERVISOR_BASE, EXTENDED_BASE);
+from system.collections import (any);
 from text import (trim_spaces);
 
 # The register `reg` ("eax", "ebx", "ecx", "edx") of a Regs value.
@@ -260,14 +261,11 @@ pub func features(snap: Snapshot): list[FeatureState] {
     return out;
 }
 
-# Names of the flags that are present, in table order.
+# Names of the flags that are present, in table order. (The binding is
+# typed: the native back end needs a comprehension's type before it is
+# returned or used.)
 pub func present_flags(snap: Snapshot): list[string] {
-    var names: list[string] = [];
-    for (state in features(snap)) {
-        if (state.present) {
-            names.push(state.feature.name);
-        }
-    }
+    let names: list[string] = [s.feature.name for s in features(snap) if s.present];
     return names;
 }
 
@@ -416,10 +414,5 @@ pub func caches(snap: Snapshot): list[CacheInfo] {
 
 # Whether `name` is in the feature table (no snapshot needed).
 pub func is_known_flag(name: string): bool {
-    for (feat in feature_table()) {
-        if (feat.name == name) {
-            return true;
-        }
-    }
-    return false;
+    return any(feature_table(), func(feat: Feature) => feat.name == name);
 }
