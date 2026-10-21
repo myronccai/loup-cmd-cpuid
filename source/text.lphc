@@ -1,8 +1,12 @@
 @mode(host.native)
 
-# Small text helpers shared by the reports. Integer arithmetic only: the
-# benchmark keeps its averages in hundredths so that formatting needs no
-# floating point.
+# Text helpers shared by the cpuid reports: hexadecimal, padding, fixed-point
+# and byte sizes, word wrapping.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` (Stage0 native build); tests/text_test.lphc checks it in
+# native test binaries. Integer arithmetic only: the benchmark keeps its
+# averages in hundredths so that formatting needs no floating point.
 
 const LOWER_DIGITS: string = "0123456789abcdef";
 const UPPER_DIGITS: string = "0123456789ABCDEF";

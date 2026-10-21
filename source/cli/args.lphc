@@ -1,8 +1,17 @@
 @mode(host.native)
 
-# Command-line parsing. cpuid has no subcommands: one optional view option
-# (-f, -c, -r, -b or --has) selects what to print, and -n sets the
+# Command-line parsing for cpuid. There are no subcommands: one optional view
+# option (-f, -c, -r, -b or --has) selects what to print, and -n sets the
 # benchmark's iteration count.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` (Stage0 native build). Pure functions of the argument list;
+# tests/args_test.lphc checks them in native test binaries.
+#
+# Structure: parse_count() validates -n. parse_args() walks argv once: it
+# splits `--name=value` and `-nN` into a name and an inline value, handles
+# the options that take a value (-n, --iterations, --has), then the flag
+# options, and at the end rejects -n without --bench.
 
 from cpu.bench import (DEFAULT_ITERATIONS);
 from cpu.decode import (is_known_flag);
@@ -63,6 +72,8 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
             inline_value = Some(arg.slice(2));
         }
 
+        # Options that take a value, from the inline part or else from the
+        # next argument.
         if (name == "-n" or name == "--iterations" or name == "--has") {
             var value = "";
             match inline_value {
@@ -91,6 +102,8 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
             continue;
         }
 
+        # Everything else is a flag: no value, and a view may be named at
+        # most once (repeating the same view is allowed).
         if (inline_value.is_some()) {
             return Err(i"option '{$ name $}' doesn't allow an argument");
         }

@@ -1,7 +1,12 @@
 @mode(host.native)
 
-# The views. Each render_* function returns the whole text for a snapshot (or
+# The cpuid views: summary, features, caches, raw leaves and the benchmark
+# table. Each render_* function returns the whole text for a snapshot (or
 # for benchmark results), so tests can check it; only run_cpuid prints.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` (Stage0 native build); tests/report_test.lphc compares the
+# rendered text exactly in native test binaries.
 
 from appinfo import (EXIT_OK, EXIT_ABSENT);
 from cli.args import (Options);

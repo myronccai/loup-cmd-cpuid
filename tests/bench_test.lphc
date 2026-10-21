@@ -1,5 +1,15 @@
 @mode(host.native)
 
+# Unit tests for the cpuid benchmark kernels (cpu/bench.lphc): every kernel
+# runs and reports time, the pointer chase is one cycle, and the measured
+# TSC frequency is plausible.
+#
+# Runtime: host.native, run by the test runner: `make test` runs
+# `loup-bootstrap test --native`, which compiles each `func test_*()` here,
+# with the modules it imports from source/ and tests/ (both on LOUPPATH),
+# into its own native binary and runs it. Not part of build/cpuid. The
+# kernels run, briefly, on the processor of the machine running `make test`.
+
 from debug.assert import (expect, expectEq);
 from cpu.bench import (run_benchmarks, chase_cycle, measure_tsc_mhz);
 from samples import (expect_text);

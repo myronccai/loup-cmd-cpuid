@@ -1,8 +1,18 @@
 @mode(host.native)
 
-# One pass over the CPUID leaves the program decodes. After the snapshot is
+# One pass over the CPUID leaves that cpuid decodes. After the snapshot is
 # taken, everything else is a pure function of it, so tests can hand the
 # decoder recorded register values instead of executing the instruction.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` (Stage0 native build). take_snapshot() executes CPUID through
+# cpu/insn.lphc on the running processor; tests/samples.lphc builds
+# Snapshot values by hand instead.
+#
+# Structure: the leaf ranges and their caps, the Leaf and Snapshot types,
+# lookups, then subleaves() (which leaves have subleaves, and where each
+# enumeration stops) and take_snapshot(), which walks the basic, hypervisor
+# and extended ranges in that order.
 
 from cpu.insn import (Regs, cpuid);
 

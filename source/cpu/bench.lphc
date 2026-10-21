@@ -1,10 +1,18 @@
 @mode(host.native)
 
-# Cycle-timed micro-benchmarks. Each kernel runs `n` iterations between two
-# ordered RDTSC reads and returns the elapsed time-stamp-counter cycles.
-# `keep` makes every iteration's result observable, and `opaque` hides
-# constants, so the optimizer can neither delete a loop nor fold it into a
-# closed form (an add loop would otherwise become one multiplication).
+# Cycle-timed micro-benchmarks for `cpuid --bench`.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` (Stage0 native build); tests/bench_test.lphc runs every
+# kernel briefly in a native test binary.
+#
+# Structure: nine kernels (k_*), the pointer-chase permutation, the TSC
+# frequency measurement, then run_benchmarks(), which keeps each kernel's
+# best run. Each kernel runs `n` iterations between two ordered RDTSC reads
+# and returns the elapsed time-stamp-counter cycles. `keep` makes every
+# iteration's result observable, and `opaque` hides constants, so the
+# optimizer can neither delete a loop nor fold it into a closed form (an add
+# loop would otherwise become one multiplication).
 
 from cpu.insn import (cpuid, rdtsc, rdtsc_ordered, keep, opaque);
 from system.time import (monotonicNs);

@@ -1,8 +1,15 @@
 @mode(host.native)
 
-# The only machine code in the program. Every `asm` block is x86-64 and is
-# allowed only because this file is host.native; in a host.dual file each one
-# is E_ASM_NOT_COMPILED, and `loup run` cannot execute them at all.
+# The only machine code in cpuid: CPUID, RDTSC, and two empty asm blocks
+# that hide values from the optimizer.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` with Stage0 (`loup-bootstrap build --target native`); the
+# self-hosted builder refuses an asm block with more than one output, such
+# as cpuid() below. Every `asm` block is x86-64 and is allowed only because
+# this file is host.native: in a host.dual file each one is
+# E_ASM_NOT_COMPILED, and `loup run` cannot execute them at all. The live
+# and bench tests run these instructions on the test machine's processor.
 #
 # Templates are Intel syntax (the compiler wraps x86 asm in
 # `.intel_syntax noprefix`). Operands bind to registers through GCC/LLVM

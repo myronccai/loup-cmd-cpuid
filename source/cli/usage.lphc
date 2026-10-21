@@ -1,5 +1,11 @@
 @mode(host.native)
 
+# The --help text and the --version line of cpuid.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` (Stage0 native build); tests/app_test.lphc prints both
+# through run().
+
 from appinfo import (APP_NAME, APP_VERSION);
 from cpu.bench import (DEFAULT_ITERATIONS, RUNS);
 

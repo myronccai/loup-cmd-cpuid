@@ -1,7 +1,17 @@
 @mode(host.native)
 
-# Pure decoding of a Snapshot: vendor, brand, signature, hypervisor, address
-# sizes, feature flags and caches. Nothing here executes CPUID.
+# Pure decoding of a cpuid Snapshot: vendor, brand, signature, hypervisor,
+# address sizes, feature flags and caches. Nothing here executes CPUID.
+#
+# Runtime: host.native. Compiled into the native binary build/cpuid by
+# `make build` (Stage0 native build). tests/decode_test.lphc runs it in
+# native test binaries against the recorded snapshots in tests/samples.lphc.
+#
+# Structure: three sections. Identity: register text, vendor, brand,
+# signature, hypervisor and address sizes. Feature flags: a table of
+# /proc/cpuinfo names with the leaf, register and bit of each. Caches: the
+# deterministic cache leaves (Intel leaf 4, AMD 0x8000001D), falling back to
+# AMD's legacy leaves 0x80000005 and 0x80000006.
 
 from cpu.insn import (Regs);
 from cpu.snapshot import (Snapshot, lookup, HYPERVISOR_BASE, EXTENDED_BASE);

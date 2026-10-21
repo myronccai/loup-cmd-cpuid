@@ -1,7 +1,13 @@
 @mode(host.native)
 
-# The views, rendered from the recorded AMD snapshot and fixed benchmark
-# numbers, compared with exact expected text.
+# Unit tests for the cpuid views (commands/report.lphc), rendered from the
+# recorded snapshots and fixed benchmark numbers and compared with exact
+# expected text.
+#
+# Runtime: host.native, run by the test runner: `make test` runs
+# `loup-bootstrap test --native`, which compiles each `func test_*()` here,
+# with the modules it imports from source/ and tests/ (both on LOUPPATH),
+# into its own native binary and runs it. Not part of build/cpuid.
 
 from debug.assert import (expect, expectEq);
 from cpu.decode import (feature_table, caches, CacheInfo);

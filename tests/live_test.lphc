@@ -1,7 +1,14 @@
 @mode(host.native)
 
-# The real processor. Values differ between machines, so these check
-# structure and facts every x86-64 processor shares.
+# Tests against the real processor. Values differ between machines, so these
+# check structure and facts every x86-64 processor shares.
+#
+# Runtime: host.native, run by the test runner: `make test` runs
+# `loup-bootstrap test --native`, which compiles each `func test_*()` here,
+# with the modules it imports from source/ and tests/ (both on LOUPPATH),
+# into its own native binary and runs it. Not part of build/cpuid. The
+# processor under test is that of the machine running `make test`: the
+# developer's or the CI runner's.
 
 from debug.assert import (expect, expectEq);
 from cpu.insn import (cpuid, rdtsc, rdtsc_ordered, opaque);
